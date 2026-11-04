@@ -4,7 +4,7 @@
 //   right-click    menu: urgent deadlines, Add deadline…, Morning / Midday / Evening / Weekly, the Notion board, Quit
 //   ⌃⌥Q            the same as a click, from anywhere
 //   status actions the menu lists today's open quests (from runs/today.json, written whenever a card is shown); each has
-//                  Clear / Track / Move to tomorrow / Open. The change is queued in pending.json like a card click, and
+//                  Clear / Track / Delay to tomorrow or next Monday / Open. The change is queued in pending.json like a card click, and
 //                  `report.py apply` writes it to Notion right away when the token is saved.
 //   not saved yet  "⏳ N changes not in Notion yet: save now" while pending.json holds clicks (the catch-up agent also
 //                  retries them every 10 min); "⚠ Notion isn't connected (N changes waiting)" while the token is missing
@@ -429,14 +429,33 @@ final class Bar: NSObject, NSApplicationDelegate {
                 add("○  To do", QuestAction(id: id, title: title, status: "📜 To Do", date: date, flash: "○ to do"))
             }
         }
-        let tomorrow = dayAfter(max(todayString(), date ?? ""))
-        add("→  Move to tomorrow", QuestAction(id: id, title: title, status: "📜 To Do", date: tomorrow, flash: "→ moved"))
+        let base = max(todayString(), date ?? "")
+        let tomorrow = dayAfter(base)
+        add("⏸  Delay to tomorrow", QuestAction(id: id, title: title, status: "📜 To Do", date: tomorrow, flash: "⏸ delayed"))
+        let monday = nextMonday(after: base)
+        if monday != tomorrow {
+            add("⏸  Delay to next Monday", QuestAction(id: id, title: title, status: "📜 To Do", date: monday, flash: "⏸ to Monday"))
+        }
         sub.addItem(.separator())
         let open = NSMenuItem(title: "Open in Notion", action: #selector(openUrgent(_:)), keyEquivalent: "")
         open.target = self
         open.representedObject = "https://app.notion.com/p/" + id
         sub.addItem(open)
         return sub
+    }
+
+    /// The first Monday after `day` ("2026-11-04" -> "2026-11-09"), Gregorian and POSIX.
+    func nextMonday(after day: String) -> String {
+        var d = dayAfter(day)
+        let f = DateFormatter()
+        f.locale = Locale(identifier: "en_US_POSIX")
+        f.calendar = Calendar(identifier: .gregorian)
+        f.dateFormat = "yyyy-MM-dd"
+        for _ in 0..<7 {
+            if let x = f.date(from: d), Calendar(identifier: .gregorian).component(.weekday, from: x) == 2 { return d }
+            d = dayAfter(d)
+        }
+        return d
     }
 
     /// "2026-10-20" -> "2026-10-21", Gregorian and POSIX whatever the region settings.

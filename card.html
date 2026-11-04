@@ -345,7 +345,7 @@
     font: italic 600 13.5px var(--font); color: var(--text-active); text-shadow: 0 0 8px var(--halo); }
   .mi .g { width: 18px; height: 18px; display: grid; place-items: center; flex: none; }
   .mi .g svg { width: 15px; height: 15px; }
-  .mi.c-done .g { color: var(--mint); } .mi.c-live .g { color: #FFB45C; } .mi.c-move .g { color: var(--gloom); }
+  .mi.c-done .g { color: var(--mint); } .mi.c-live .g { color: #FFB45C; } .mi.c-move .g, .mi.c-week .g { color: var(--gloom); }
   .mi.c-todo .g { color: var(--ui-cyan); } .mi.c-undo .g { color: var(--cream-grey); } .mi.c-open .g { color: var(--ui-cyan); }
   .mi .lbl { flex: 1; white-space: nowrap; }
   .mi.warn .lbl { color: #FFB59E; } .mi.warn .g { color: #FF8A66; }
@@ -720,6 +720,28 @@
   body.full .kp { font-size: 14px; }
   .ft { gap: 14px; }
 
+  /* ===== visible actions: a ✓ box on every quest row; Done / Track / Move buttons in the detail panel ===== */
+  .q, body.k-weekly .q { padding-right: 50px; }
+  .ck { position: absolute; right: 20px; top: 0; bottom: 0; width: 26px; padding: 0; display: grid; place-items: center; cursor: pointer;
+    border: 0; border-left: 1px solid rgba(150,178,192,.28); background: #0B2F3C; color: rgba(66,255,186,.5); }
+  .ck svg { width: 13px; height: 13px; }
+  .ck:hover, .q.sel .ck { background: #0E3A48; color: var(--mint); }
+  .ck:hover svg, .ck.on svg { filter: drop-shadow(0 0 4px rgba(66,255,186,.7)); }
+  .ck.on { color: var(--mint); background: rgba(66,255,186,.12); }
+  .q.flash .ck::after { content: ""; position: absolute; inset: 4px 2px; border-radius: 5px; border: 2px solid var(--mint); opacity: 0;
+    pointer-events: none; animation: burst .5s cubic-bezier(.2,.8,.2,1); }
+  .q.flash .mk::after { display: none; }
+  .dacts { display: flex; flex-wrap: wrap; gap: 8px; margin: 10px 0 2px; }
+  .dact { display: inline-flex; align-items: center; gap: 6px; height: 28px; padding: 0 12px; border-radius: 14px; cursor: pointer;
+    background: var(--cell); border: 1px solid var(--cell-border); font: italic 600 12.5px var(--font); color: var(--ui-cyan); }
+  .dact svg { width: 13px; height: 13px; }
+  .dact:hover { border-color: var(--gold-soft); color: var(--text-selected); }
+  .dact.done { color: var(--mint); border-color: rgba(66,255,186,.5); background: rgba(66,255,186,.08); }
+  .dact.track.on { color: var(--gold); border-color: rgba(251,228,106,.55); }
+  .dact.move { color: var(--gloom); border-color: var(--gloom-border); }
+  .dact.undo { color: var(--cream-grey); }
+  body.full .dact { height: 32px; padding: 0 14px; font-size: 14px; }
+
   @media (prefers-reduced-motion: reduce) {
     *, *::before, *::after { animation: none !important; transition: none !important; }
     body:not(.go) .card, body:not(.go) .anim, body:not(.go) .q { opacity: 1; }
@@ -808,7 +830,7 @@
     morning: { kind: "morning", eyebrow: "Morning briefing · Tue 03/11", title: "Today · Tue 03/11", subtitle: "3 quests to do · win the day = clear 1 ⭐",
       progress: { done: 0, total: 3 },
       sections: [{ heading: "Today", items: [BUG, Object.assign({ tags: ["↩︎ from yesterday"] }, OUTLINE), SPANISH] }],
-      note: "⭐ first, 🎮 after. Use a quest's status slot to update it." },
+      note: "⭐ first, 🎮 after. Tick ✓ when a quest is done." },
     midday: { kind: "midday", eyebrow: "Midday check · Tue 03/11", title: "2 quests left for tonight", subtitle: "Start the ⭐ quest as soon as you're home.",
       sections: [{ items: [Object.assign({}, BUG, { live: true, status: "🔥 Grinding" }), SPANISH] }] },
     evening: { kind: "evening", eyebrow: "Evening report · Mon 02/11", title: "Tomorrow: 2 ⭐ + 1 🎮", subtitle: "No worries, ⭐ first tomorrow. Sleep on time 🛌",
@@ -871,6 +893,7 @@
   const dayLabel = s => { const d = parseIso(s); return d ? DAYS[d.getDay()] + " " + pad(d.getDate()) + "/" + pad(d.getMonth() + 1) : ""; };
   const todayIso = () => isoOf(new Date());
   const nextDayIso = s => { const d = parseIso(s) || new Date(); d.setDate(d.getDate() + 1); return isoOf(d); };
+  const nextMondayIso = s => { const d = parseIso(s) || new Date(); do { d.setDate(d.getDate() + 1); } while (d.getDay() !== 1); return isoOf(d); };
 
   /* ---------- talking to the Swift host (or the browser preview) ---------- */
   const cardEl = document.getElementById("card");
@@ -1157,11 +1180,13 @@
       const mk = el(id ? "button" : "span", "mk" + (id ? "" : " static"));
       if (id) { mk.type = "button"; noFocus(mk); mk.setAttribute("aria-label", "Track quest"); mk.title = "Track (T) · Status menu: Space"; }
       q.appendChild(mk);
+      let ck = null;   // the visible done box: click = Clear, again = take it back
+      if (id) { ck = el("button", "ck"); ck.type = "button"; noFocus(ck); ck.setAttribute("aria-label", "Done"); q.appendChild(ck); }
       if (type !== "side") { q.appendChild(el("span", "qtag " + type, type === "main" ? "Main" : "Fun")); q.classList.add("has-tag"); }
       lists.appendChild(q);
       const date = parseIso(it.date) ? it.date : null;
       const o = { status: origStatus(it), date };
-      rows.push({ it, el: q, mk, id, sec: si, orig: o, now: Object.assign({}, o), done: o.status === STATUS.done, sync: "" });
+      rows.push({ it, el: q, mk, ck, id, sec: si, orig: o, now: Object.assign({}, o), done: o.status === STATUS.done, sync: "" });
     });
     if (sorted.length > CAP || fillers.length) {
       const m = el("div", "more anim", sorted.length > CAP ? "+" + (sorted.length - CAP) + " more" : fillers[0].title);
@@ -1213,8 +1238,13 @@
     const live = r.now.status === STATUS.grinding;
     r.el.classList.toggle("done", r.done);
     r.el.classList.toggle("moved", moved && !r.done);
-    r.mk.className = "mk " + (r.done ? "s-done" : moved ? "s-moved" : live ? "s-track" : "s-todo");
-    r.mk.innerHTML = r.done ? G.check : moved ? G.next : G.track;   // to-do shows a faint target on hover: "click to track"
+    r.mk.className = "mk " + (r.done ? "s-off" : moved ? "s-moved" : live ? "s-track" : "s-todo");
+    r.mk.innerHTML = r.done ? "" : moved ? G.next : G.track;   // to-do shows a faint target on hover: "click to track"
+    if (r.ck) {   // the check lives in its own box now
+      r.ck.classList.toggle("on", r.done);
+      r.ck.innerHTML = r.done ? G.check : G.box;
+      r.ck.title = r.done ? "Cleared · click to take it back (D)" : "Done (D)";
+    }
     r.el.classList.toggle("tracked", live && !r.done);
   };
   rows.forEach(r => r.el.addEventListener("animationend", (e) => {
@@ -1226,7 +1256,7 @@
   rows.forEach(renderRow); markSections();
   const statusLabel = (r) => {
     if (r.now.status === STATUS.done) return ["Cleared", "done"];
-    if (isMoved(r)) return ["Moved to " + dayLabel(r.now.date), "delay"];
+    if (isMoved(r)) return ["Delayed to " + dayLabel(r.now.date), "delay"];
     if (r.now.status === STATUS.grinding) return ["Tracking", "live"];
     if (r.now.status === STATUS.delay) return ["Delayed", "delay"];
     return ["To do", ""];
@@ -1436,13 +1466,16 @@
     const base = r.now.date && r.now.date > t ? r.now.date : t;
     const tomorrow = nextDayIso(base);
     const keepDate = r.now.date;
-    const dd = r.done ? null : dueDay(r), late = !!dd && tomorrow > dd;   // moving past the Due: say so
+    const monday = nextMondayIso(base);
+    const dd = r.done ? null : dueDay(r), late = !!dd && tomorrow > dd, lateM = !!dd && monday > dd;   // past the Due: say so
     const list = [
       { key: "done", label: "Clear", glyph: G.check, target: { status: STATUS.done, date: keepDate } },
       { key: "live", label: "Track (in progress)", glyph: G.track, target: { status: STATUS.grinding, date: keepDate } },
-      { key: "move", label: "Move to " + dayLabel(tomorrow) + (late ? " · after its deadline" : ""), warn: late, glyph: G.next, target: { status: STATUS.todo, date: tomorrow } },
+      { key: "move", label: "Delay to " + dayLabel(tomorrow) + (late ? " · after its deadline" : ""), warn: late, glyph: G.next, target: { status: STATUS.todo, date: tomorrow } },
+      { key: "week", label: "Delay to " + dayLabel(monday) + (lateM ? " · after its deadline" : ""), warn: lateM, glyph: G.next, target: { status: STATUS.todo, date: monday } },
       { key: "todo", label: "To do", glyph: G.box, target: { status: STATUS.todo, date: keepDate } },
-    ].filter(c => c.key !== "move" || r.orig.date);   // moving needs the quest's date so it can be undone
+    ].filter(c => (c.key !== "move" && c.key !== "week") || r.orig.date)   // a delay needs the quest's date so it can be undone
+     .filter(c => c.key !== "week" || monday !== tomorrow);
     list.forEach(c => { c.current = c.target.status === r.now.status && (c.target.date || null) === (r.now.date || null); });
     if (r.now.status !== r.orig.status || r.now.date !== r.orig.date) list.push({ key: "undo", label: "Undo", glyph: G.back, target: Object.assign({}, r.orig) });
     list.push({ key: "open", label: "Open in Notion", glyph: G.open, sep: true });
@@ -1575,12 +1608,28 @@
     const map = el("div", "dmap"); map.innerHTML = ART.banner(it); detail.appendChild(map);
     const head = el("div", "dhead"); head.appendChild(svgEl(G[type], "tslot " + type)); head.appendChild(put(el("div", "dtitle"), it.title || ""));
     detail.appendChild(head);
+    const acts = el("div", "dacts");   // the actions, as buttons you can see (Space and the keys still work)
+    const act = (cls, glyph, text, key, fn) => {
+      const b = noFocus(el("button", "dact " + cls)); b.type = "button"; b.title = key; b.innerHTML = glyph; b.appendChild(el("span", null, text));
+      b.addEventListener("click", e => { e.stopPropagation(); fn(); }); acts.appendChild(b);
+    };
+    if (r.done) act("undo", G.back, "Not done yet", "D", () => toggleDone(r));
+    else {
+      act("done", G.check, "Done", "D", () => toggleDone(r));
+      act("track" + (tracked ? " on" : ""), G.track, tracked ? "Stop tracking" : "Track", "T", () => toggleTrack(r));
+      if (!urgent) choices(r).filter(c => (c.key === "move" || c.key === "week") && !c.current).forEach(c =>
+        act("move", G.next, c.label, c.key === "move" ? "Delay to the next day" : "Delay to next Monday", () => {
+          if (performance.now() - goAt < 800 || leaving) return;
+          apply(r, c.target); if (c.warn) toast("Past its deadline: due " + dayLabel(dueDay(r)));
+        }));
+    }
+    detail.appendChild(acts);
     const giver = el("div", "giver");   // the game's "quest giver ——— location" line: questline ——— day
     giver.appendChild(el("span", "bang", "!"));
     giver.appendChild(put(el("span"), it.questline || TYPE_LABEL[type]));
     giver.appendChild(el("i", "gl"));
     const when = dayLabel(r.now.date) || it.label || "";
-    giver.appendChild(el("span", "loc", (isMoved(r) ? "Moved to " : "") + when));
+    giver.appendChild(el("span", "loc", (isMoved(r) ? "Delayed to " : "") + when));
     detail.appendChild(giver);
     const meta = el("div", "dmeta");
     const e = energySpan(it); if (e) meta.appendChild(e);
@@ -1671,8 +1720,9 @@
     setLabel(kTrack, cur.id && !cur.done && cur.now.status === STATUS.grinding ? "Untrack" : urgent ? "Start" : "Track");
     kBoard.hidden = m || !full || urgent;               // B still works on the corner card
     kMode.hidden = m || (d && !full) || urgent;
-    kDone.hidden = !urgent || m || !pickable.length;
-    kDone.disabled = !cur.id || !!cur.done;
+    kDone.hidden = m || !pickable.length;
+    kDone.disabled = !cur.id || (urgent && !!cur.done);
+    setLabel(kDone, !urgent && cur.id && cur.done ? "Undo" : "Done");
     kSnooze.hidden = !urgent || m;
     setLabel(kMode, full ? "Minimize" : "Expand");
     setLabel(kOpen, m ? "Choose" : d ? "Open in Notion" : sel && sel.id ? "Details" : "Open board");
@@ -1690,7 +1740,15 @@
     apply(r, { status: STATUS.done, date: r.now.date });
     if (rows.every(x => !x.id || x.done)) setTimeout(() => leave("close"), 1100);
   };
-  kDone.onclick = () => doneRow(detailRow || sel);
+  // ✓ on a row, D, the footer's Done and the detail panel's Done: clear the quest, or take a clear back
+  const doneTarget = (r) => !r.done ? { status: STATUS.done, date: r.now.date }
+    : r.orig.status !== STATUS.done ? Object.assign({}, r.orig) : { status: STATUS.todo, date: r.now.date };
+  const toggleDone = (r) => {
+    if (!r || !r.id || leaving || performance.now() - goAt < 800) return;
+    if (urgent) { doneRow(r); return; }
+    apply(r, doneTarget(r));
+  };
+  kDone.onclick = () => toggleDone(detailRow || sel);
   kSnooze.onclick = () => leave("snooze", { minutes: 15 });
   kMode.onclick = () => setFull(!full);
 
@@ -1725,8 +1783,9 @@
       if (menuRow || r === sel || performance.now() - goAt < 600 || !(e.movementX || e.movementY)) return;
       select(r);
     });
-    r.el.addEventListener("click", (e) => { if (e.target.closest(".mk") || menuRow) return; select(r); });
-    r.el.addEventListener("dblclick", (e) => { if (e.target.closest(".mk")) return; openDetail(r); });
+    r.el.addEventListener("click", (e) => { if (e.target.closest(".mk, .ck") || menuRow) return; select(r); });
+    r.el.addEventListener("dblclick", (e) => { if (e.target.closest(".mk, .ck")) return; openDetail(r); });
+    if (r.ck) r.ck.addEventListener("click", (e) => { e.stopPropagation(); if (menuRow) closeMenu(false); select(r, { sound: false }); toggleDone(r); });
     r.mk.addEventListener("click", (e) => { e.stopPropagation(); if (menuRow) closeMenu(false); select(r, { sound: false }); toggleTrack(r); });
   });
   // a click outside the open menu closes it
@@ -1758,7 +1817,7 @@
     if (k === "Escape") { (detailRow && !full) ? closeDetail() : leave("close"); return; }
     if (!touched) return;
     if (urgent && (k === "s" || k === "S")) { e.preventDefault(); leave("snooze", { minutes: 15 }); return; }
-    if (urgent && (k === "d" || k === "D")) { e.preventDefault(); doneRow(detailRow || sel); return; }
+    if (k === "d" || k === "D") { e.preventDefault(); toggleDone(detailRow || sel); return; }
     if ((k === "m" || k === "M") && !urgent) { e.preventDefault(); setFull(!full); return; }
     if (k === "b" || k === "B") { leave("open"); return; }
     if (detailRow) {

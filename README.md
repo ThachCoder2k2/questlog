@@ -23,7 +23,8 @@ quest, and nothing to remember: the cards come to you.
   report (cleared count, ⭐ done or not, day streak, tomorrow's plan).
 - **Check-ins every 2 hours** (09:00–21:00): a small corner card with what is still open today, only while you are
   at the Mac.
-- **Act on the card**: Clear, Track (🔥 in progress), Move to tomorrow, Undo, Open in Notion, with the keyboard or the mouse.
+- **Act on the card**: a ✓ box on every quest, plus Track (🔥 in progress), Delay (to tomorrow or next Monday), Undo and
+  Open in Notion, with the mouse or the keyboard.
 - **Detail panel** for each quest: illustration, questline goal, next 2-minute step, questline log.
 - **Menu-bar button**: opens the card any time (⌃⌥Q), lists today's quests with quick actions (kept in sync with
   Notion every 10 minutes), adds a quest for today in one line, undoes the last change, shows a tracking timer.
@@ -121,9 +122,10 @@ open card. A check-in also skips the hour before a scheduled card. Change the rh
 | input | action |
 |---|---|
 | hover, ↑ / ↓ (or j / k) | move the gold cursor |
-| click the slot at a quest's right end, or T | track it (one tracked quest at a time); again = untrack |
-| Space | action menu: Clear · Track · Move to tomorrow · To do · Undo · Open in Notion |
-| Enter, →, double-click | detail panel |
+| click the ✓ box on a quest, or D | done; again = not done yet |
+| click the ring slot at a quest's right end, or T | track it (one tracked quest at a time); again = untrack |
+| Space | action menu: Clear · Track · Delay to tomorrow · Delay to next Monday · To do · Undo · Open in Notion |
+| Enter, →, double-click | detail panel, with Done · Track · Delay buttons |
 | Enter in the detail panel | open the quest in Notion |
 | B | open the board in Notion |
 | M | full screen ⇄ corner card |
@@ -135,7 +137,7 @@ The card opens full screen; `"display": "compact"` in its data opens it as the c
 
 **Menu-bar button**: click or ⌃⌥Q opens the card for the time of day (or the last saved one when offline).
 Right-click for:
-- today's quests, each with Clear · Track · To do · Move to tomorrow · Open in Notion (the list is re-read from Notion
+- today's quests, each with Clear · Track · To do · Delay to tomorrow · Delay to next Monday · Open in Notion (the list is re-read from Notion
   every 10 minutes and right after each change);
 - **↶ Undo** (⌘Z while the menu is open) for the last change made in the menu, for 30 minutes;
 - **Add quest for today…**: one line, e.g. `Buy batteries | check which size first` (text after ` | ` is the 2-minute
@@ -284,7 +286,7 @@ like a password; set `"titles": false` in `push.json` to send no quest titles or
 Item: `{type: "main"|"side"|"fun", title, url?, status?, date?, label?, tags?, live?, done?, start?, questline?, goal?, energy?, steps?}`
 
 - `url`: the quest's Notion page; without it the row can't be opened or changed.
-- `status`: the Notion Status exactly; Undo restores it. `date` (`YYYY-MM-DD`) is needed for "Move to tomorrow".
+- `status`: the Notion Status exactly; Undo restores it. `date` (`YYYY-MM-DD`) is needed for "Delay".
 - `start`: the 2-Min Start (wrap shell commands in backticks). `steps`: the questline's quests `[{title, url?, date?, done?}]`.
 
 Sounds: put your own files in `sounds/custom/` (same names as in `sounds/`, `.wav` `.aiff` `.caf` `.m4a` `.mp3`) to

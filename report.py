@@ -580,7 +580,7 @@ def build_morning(data, T, ledger):
     first = next((r for r in todo if r["type"] == MAIN), todo[0] if todo else None)
     if first and start_text(first["start"]):
         card["callout"] = {"label": "2-minute start", "text": start_text(first["start"])}
-    card["note"] = "⭐ first, 🎮 after. Use a quest's status slot to update it."
+    card["note"] = "⭐ first, 🎮 after. Tick ✓ when a quest is done."
     card["timeoutSec"] = 1800
     return card
 
