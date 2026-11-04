@@ -8,6 +8,7 @@
 //                  `report.py apply` writes it to Notion right away when the token is saved.
 //   not saved yet  "⏳ N changes not in Notion yet: save now" while pending.json holds clicks (the catch-up agent also
 //                  retries them every 10 min); "⚠ Notion isn't connected (N changes waiting)" while the token is missing
+//   add / undo     "Add quest for today…" (one line, `report.py add-today`); "↶ Undo" takes back the last status change (30 min)
 //   tracking       a quest you hit Track on (🔥 Grinding, from pending.json / applied.json) shows "▶ 12m" next to the icon
 //   ⌃⌥D            Add deadline…: one line ("Submit visa form, tomorrow 9am") becomes a quest with a Due in Notion
 //
@@ -172,6 +173,7 @@ final class Bar: NSObject, NSApplicationDelegate {
     var tracking: Tracking?        // the quest being tracked, if any
     var todayItems: [TodayItem] = []   // today's open quests (menu)
     var retryText = ""              // what was typed when the line wasn't understood: put back in the box
+    var lastUndo: (label: String, actions: [QuestAction], at: Date)?   // the menu's last status change, to take back
     var tooltipNote = ""            // what the last add said, until the next refresh of the tooltip
     var lastOpen = Date.distantPast
     var urgent: [Urgent] = []      // soonest deadline first
@@ -274,9 +276,16 @@ final class Bar: NSObject, NSApplicationDelegate {
             menu.addItem(m)
         }
         if urgent.contains(where: { $0.level() > 0 }) { menu.addItem(.separator()) }
+        if let u = lastUndo, Date().timeIntervalSince(u.at) < 1800 {
+            let m = NSMenuItem(title: "↶  Undo: \(u.label)", action: #selector(undoLast), keyEquivalent: "z")
+            m.keyEquivalentModifierMask = [.command]
+            m.target = self
+            menu.addItem(m)
+            menu.addItem(.separator())
+        }
         if let t = tracking {
             let m = NSMenuItem(title: "▶  Tracking: \(shorten(t.title)) · \(t.elapsed)", action: nil, keyEquivalent: "")
-            m.submenu = questMenu(id: t.id, title: t.title, tracked: true, date: nil)
+            m.submenu = questMenu(id: t.id, title: t.title, tracked: true, date: nil, status: "🔥 Grinding")
             menu.addItem(m)
         }
         let others = todayItems.filter { $0.id != tracking?.id }
@@ -288,7 +297,7 @@ final class Bar: NSObject, NSApplicationDelegate {
             for q in others.prefix(8) {
                 let icon = q.type == "main" ? "⭐" : q.type == "fun" ? "🎮" : "🧩"
                 let m = NSMenuItem(title: "\(icon)  \(shorten(q.title))", action: nil, keyEquivalent: "")
-                m.submenu = questMenu(id: q.id, title: q.title, tracked: false, date: q.date)
+                m.submenu = questMenu(id: q.id, title: q.title, tracked: false, date: q.date, status: q.status)
                 menu.addItem(m)
             }
             menu.addItem(.separator())
@@ -311,6 +320,9 @@ final class Bar: NSObject, NSApplicationDelegate {
         open.keyEquivalentModifierMask = [.control, .option]
         open.target = self
         menu.addItem(open)
+        let addQuest = NSMenuItem(title: "Add quest for today…", action: #selector(addToday), keyEquivalent: "")
+        addQuest.target = self
+        menu.addItem(addQuest)
         let add = NSMenuItem(title: "Add deadline…", action: #selector(addDeadline), keyEquivalent: "d")
         add.keyEquivalentModifierMask = [.control, .option]
         add.target = self
@@ -400,7 +412,7 @@ final class Bar: NSObject, NSApplicationDelegate {
     func shorten(_ text: String) -> String { text.count > 44 ? String(text.prefix(43)) + "…" : text }
 
     /// The actions of one quest: Clear, Track / Stop tracking, Move to tomorrow, Open in Notion.
-    func questMenu(id: String, title: String, tracked: Bool, date: String?) -> NSMenu {
+    func questMenu(id: String, title: String, tracked: Bool, date: String?, status: String = "📜 To Do") -> NSMenu {
         let sub = NSMenu()
         func add(_ label: String, _ action: QuestAction) {
             let m = NSMenuItem(title: label, action: #selector(applyQuest(_:)), keyEquivalent: "")
@@ -413,6 +425,9 @@ final class Bar: NSObject, NSApplicationDelegate {
             add("■  Stop tracking", QuestAction(id: id, title: title, status: "📜 To Do", flash: "■ stopped"))
         } else {
             add("▶  Track (start now)", QuestAction(id: id, title: title, status: "🔥 Grinding", flash: "▶ tracking"))
+            if status != "📜 To Do" {   // e.g. ⏸ Delay: back to a plain to-do
+                add("○  To do", QuestAction(id: id, title: title, status: "📜 To Do", date: date, flash: "○ to do"))
+            }
         }
         let tomorrow = dayAfter(max(todayString(), date ?? ""))
         add("→  Move to tomorrow", QuestAction(id: id, title: title, status: "📜 To Do", date: tomorrow, flash: "→ moved"))
@@ -441,6 +456,29 @@ final class Bar: NSObject, NSApplicationDelegate {
         if a.status == "🔥 Grinding", let t = tracking, t.id != a.id {   // one tracked quest at a time, like the card
             changes.insert(QuestAction(id: t.id, title: t.title, status: "📜 To Do", flash: ""), at: 0)
         }
+        // What each quest was before, from the list this menu shows, so the change can be taken back.
+        let before = changes.map { c -> QuestAction in
+            let known = todayItems.first { $0.id == c.id }
+            let was = known?.status ?? (tracking?.id == c.id ? "🔥 Grinding" : "📜 To Do")
+            return QuestAction(id: c.id, title: c.title, status: was, date: known?.date ?? c.date, flash: "↶ undone")
+        }
+        if perform(changes, flash: a.flash) {
+            lastUndo = ("\(a.flash.drop(while: { $0 != " " }).trimmingCharacters(in: .whitespaces)) · \(shorten(a.title))", before, Date())
+            lastIconKey = ""
+            refresh()
+        }
+    }
+
+    /// The menu's "↶ Undo": put the quests of the last status change back the way they were.
+    @objc func undoLast() {
+        guard let u = lastUndo, Date().timeIntervalSince(u.at) < 1800 else { lastUndo = nil; return }
+        lastUndo = nil
+        _ = perform(u.actions, flash: "↶ undone")
+    }
+
+    /// Queue status changes like card clicks (pending.json), then write them to Notion if a token is saved;
+    /// `report.py apply` also refreshes the menu's list from Notion.
+    func perform(_ changes: [QuestAction], flash text: String) -> Bool {
         var actions: [[String: Any]] = []
         if let data = try? Data(contentsOf: queueFile),
            let obj = try? JSONSerialization.jsonObject(with: data) as? [String: Any] {
@@ -456,19 +494,20 @@ final class Bar: NSObject, NSApplicationDelegate {
         }
         guard let out = try? JSONSerialization.data(withJSONObject: ["version": 1, "actions": actions], options: [.prettyPrinted]) else {
             NSSound.beep()
-            return
+            return false
         }
         do {
             try out.write(to: queueFile, options: .atomic)
         } catch {
             NSSound.beep()
-            return
+            return false
         }
-        flash = (a.flash, Date().addingTimeInterval(3))
+        flash = (text, Date().addingTimeInterval(3))
         tooltipNote = ""
         lastIconKey = ""
         refresh()
         if notionOK { runPython(["apply"]) }
+        return true
     }
 
     /// `report.py <args>` in the background; the icon refreshes when it ends.
@@ -561,10 +600,35 @@ final class Bar: NSObject, NSApplicationDelegate {
         if !text.isEmpty { runAdd(text) }
     }
 
-    func runAdd(_ text: String) {
+    /// Menu: one line becomes a quest dated today (`report.py add-today`): "* " in front = ⭐ Main, " | " = its 2-minute start.
+    @objc func addToday() {
+        if addOpen { return }
+        addOpen = true
+        defer { addOpen = false }
+        NSApp.activate(ignoringOtherApps: true)
+        let alert = NSAlert()
+        alert.icon = icon(done: false, level: 0, pulse: true)
+        alert.messageText = "Add a quest for today"
+        alert.informativeText = "One line. Put * in front for a ⭐ Main quest; after \" | \" its 2-minute start:\n  Buy batteries | check which size first\n  * Finish the report | open the draft"
+        let field = NSTextField(frame: NSRect(x: 0, y: 0, width: 360, height: 24))
+        field.placeholderString = "Buy batteries | check which size first"
+        field.stringValue = retryText
+        retryText = ""
+        alert.accessoryView = field
+        alert.addButton(withTitle: "Add")
+        alert.addButton(withTitle: "Cancel")
+        alert.window.initialFirstResponder = field
+        alert.window.level = .floating
+        centre(alert)
+        guard alert.runModal() == .alertFirstButtonReturn else { return }
+        let text = field.stringValue.trimmingCharacters(in: .whitespacesAndNewlines)
+        if !text.isEmpty { runAdd(text, command: "add-today") }
+    }
+
+    func runAdd(_ text: String, command: String = "add") {
         let p = Process()
         p.executableURL = URL(fileURLWithPath: python)
-        p.arguments = [reportPy, "add", "--", text]
+        p.arguments = [reportPy, command, "--", text]
         p.environment = ["PYTHONIOENCODING": "utf-8", "LANG": "en_US.UTF-8", "HOME": NSHomeDirectory(), "PATH": "/usr/bin:/bin"]
         let out = Pipe(), err = Pipe()
         p.standardOutput = out
@@ -580,7 +644,7 @@ final class Bar: NSObject, NSApplicationDelegate {
                     self.tooltipNote = said.trimmingCharacters(in: .whitespacesAndNewlines)
                     NSSound(named: NSSound.Name("Glass"))?.play()
                 } else {
-                    self.failedAdd(text: text, code: done.terminationStatus, message: complained.trimmingCharacters(in: .whitespacesAndNewlines))
+                    self.failedAdd(text: text, code: done.terminationStatus, message: complained.trimmingCharacters(in: .whitespacesAndNewlines), command: command)
                 }
                 self.lastIconKey = ""   // redraw the icon and the menu with the new deadline
                 self.refresh()
@@ -596,12 +660,12 @@ final class Bar: NSObject, NSApplicationDelegate {
     }
 
     /// exit 2 = the line wasn't understood (ask again, with the text kept), 3 = no token (offer the setup), else Notion's message.
-    func failedAdd(text: String, code: Int32, message: String) {
+    func failedAdd(text: String, code: Int32, message: String, command: String = "add") {
         NSApp.activate(ignoringOtherApps: true)
         let alert = NSAlert()
         alert.alertStyle = .warning
         alert.icon = icon(done: false, level: 0, pulse: true)
-        alert.messageText = code == 2 ? "Couldn't read that" : code == 3 ? "Notion isn't connected" : "Couldn't add the deadline"
+        alert.messageText = code == 2 ? "Couldn't read that" : code == 3 ? "Notion isn't connected" : command == "add" ? "Couldn't add the deadline" : "Couldn't add the quest"
         alert.informativeText = message.isEmpty ? "Something went wrong. See runs/bar.log." : message
         alert.window.level = .floating
         centre(alert)
@@ -614,7 +678,7 @@ final class Bar: NSObject, NSApplicationDelegate {
             alert.addButton(withTitle: "Cancel")
             if alert.runModal() == .alertFirstButtonReturn {
                 retryText = text
-                DispatchQueue.main.async { self.addDeadline() }
+                DispatchQueue.main.async { command == "add" ? self.addDeadline() : self.addToday() }
             }
         } else {
             alert.addButton(withTitle: "OK")

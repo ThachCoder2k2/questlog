@@ -23,14 +23,20 @@ Notion"). Python 3.9+ standard library only.
                                        when Notion is unreachable. KIND defaults to the one for the time of day
                                        (morning / midday / evening / weekly = the last weekly card)
   python3 report.py catchup            LaunchAgent (at login and every 10 min): write the queued clicks to Notion (any
-                                       mode), refresh the deadlines and show the urgent card if one is due; show the one
-                                       card that is due and unseen once you are back at the Mac (not while another card
-                                       is open; live mode only)
+                                       mode), refresh the menu bar's files and show the urgent card if a deadline step is
+                                       due; show the one card that is due and unseen once you are back at the Mac (not
+                                       while another card is open; live mode only), else maybe a check-in card
   python3 report.py gate KIND          for the Claude tasks: "go DATE" or "skip: why" (outside the window, already shown,
                                        or the local runner is live and shows it)
   python3 report.py status             mode, token, which cards were shown today, the saved cards
-  python3 report.py refresh            read the quests that have a Due date into runs/urgent.json (needs the token)
-  python3 report.py apply              write the queued card clicks to Notion now (the menu bar's status actions run it)
+  python3 report.py refresh            read the board into the menu bar's files: deadlines (runs/urgent.json), today's
+                                       list (runs/today.json), today's cleared/total (runs/status.json); needs the token
+  python3 report.py apply              write the queued card clicks to Notion now, then refresh the menu bar's list
+                                       (the menu bar's status actions run it)
+  python3 report.py checkin [--dry-run]  the check-in card now (the catch-up shows it by itself every 2 hours,
+                                       09:00–21:00, while you are at the Mac and no card is open)
+  python3 report.py add-today -- "TITLE | 2-MIN START"   a quest for today ("* " in front = ⭐ Main); the menu bar's
+                                       "Add quest for today…"
   python3 report.py add -- "TITLE, WHEN"  create a deadline quest in Notion (the menu bar's "Add deadline…"); WHEN reads
                                        "tomorrow 9am", "fri 17:00", "in 3h", "26/10 10:30" (quickadd.py); --dry-run only parses
   python3 report.py urgent [tick|list|snooze MIN|clear] [--force] [--dry-run]
@@ -300,23 +306,41 @@ def sync_deadlines(rows):
         log(f"deadlines not saved: {e!r}")
 
 
-def refresh_deadlines():
-    """Read the quests with a Due date from Notion into runs/urgent.json. Needs the token; 0 also when there is none
-    (the Claude tasks fill the list through `urgent.py set` then)."""
+def refresh_deadlines(now=None):
+    """Read the board once and keep the menu bar current: the quests with a Due date (runs/urgent.json, the "!" badge),
+    today's open quests (runs/today.json, the right-click list) and today's cleared/total (runs/status.json). The
+    catch-up agent runs it every 10 minutes, and `report.py apply` after every menu-bar click. Needs the token; 0 also
+    when there is none (the Claude tasks fill the deadline list through `urgent.py set` then)."""
     token = read_token()
     if not token:
         return 0
     try:
-        pages = query_all(token, QUESTS_DB, {"filter": {"and": [
-            {"property": "Due", "date": {"is_not_empty": True}},
-            {"property": "Status", "status": {"does_not_equal": CLEARED}}]}})
+        data = fetch(token)
     except NotionError as e:
-        log(f"deadlines: {e}")
+        log(f"refresh: {e}")
         return 1
-    rows = [quest_row(pg) for pg in pages]
-    items = urgent.save(urgent_items(rows))
+    items = urgent.save(urgent_items(data["rows"]))
+    try:
+        refresh_today(data, now or datetime.now())
+    except Exception as e:  # noqa: BLE001  the list is a convenience; the deadline badge matters more
+        log(f"refresh: today's list not written: {e!r}")
     log(f"deadlines: {len(items)} open")
     return 0
+
+
+def refresh_today(data, now):
+    """Today's quests as the morning card would list them (with the clicks still in the queue applied), written for
+    the menu bar. The cleared/total badge is left alone from 21:30, when the evening report's numbers take over."""
+    T = now.date()
+    extra = []
+    overlay(data["rows"], queued(), extra)
+    data["rows"].sort(key=lambda r: (RANK.get(r["type"], 3), r["date"] is None, r["date"] or ""))
+    ledger = [e for e in pending.read_json(pending.LEDGER, "applied") if isinstance(e, dict)] + extra
+    card = build_morning(data, T, ledger)
+    qlstate.write_today(card, T)
+    if 4 <= now.hour + now.minute / 60 < WINDOW["evening"][0]:
+        qlstate.write_status(card, T)
+    return card
 
 
 def add_cmd(rest, args):
@@ -377,7 +401,7 @@ def apply_cmd():
     except Exception as e:  # noqa: BLE001
         log(f"apply: {e!r}")
         return 1
-    return 0
+    return refresh_deadlines()   # the menu bar's list and badge follow the change at once
 
 
 def deadline_tick(now=None):
@@ -955,9 +979,101 @@ def sync_queue():
     return 0
 
 
+CHECKIN_EVERY = timedelta(hours=2)   # a small check-in card when no card has been on screen for this long…
+CHECKIN_HOURS = (9.0, 21.0)          # …between these hours (local time)…
+CHECKIN_QUIET = timedelta(hours=1)   # …and not in the hour before the 07:30 / 12:00 / 22:00 card
+
+
+def last_card_at():
+    """When a day card was last on screen: the newest saved card (scheduled, check-in or opened from the button) or the
+    last check-in that found nothing left. Naive local time, or None."""
+    best = None
+    for kind in TIMES:
+        c = qlstate.load_last(kind)
+        t = qlstate.saved_at(c) if c else None
+        if t:
+            t = t.astimezone().replace(tzinfo=None)
+            best = t if best is None or t > best else best
+    try:
+        with open(os.path.join(RUNS, "checkin.last"), encoding="utf-8") as f:
+            t = datetime.fromisoformat(f.read().strip())
+        best = t if best is None or t > best else best
+    except (OSError, ValueError):
+        pass
+    return best
+
+
+def checkin_skip(now):
+    """Why no check-in card now (None = it may show, if you are at the Mac and no card is open)."""
+    h = now.hour + now.minute / 60
+    if not CHECKIN_HOURS[0] <= h < CHECKIN_HOURS[1]:
+        return "outside %02d:00–%02d:00" % CHECKIN_HOURS
+    for kind, (hh, mm) in TIMES.items():
+        slot = now.replace(hour=hh, minute=mm, second=0, microsecond=0)
+        if timedelta(0) <= slot - now < CHECKIN_QUIET:
+            return f"the {kind} card comes at {hh:02d}:{mm:02d}"
+    last = last_card_at()
+    if last and now - last < CHECKIN_EVERY:   # (a card stamped later than now, after a clock change, also counts as recent)
+        return f"a card was on screen at {last:%H:%M}"
+    return None
+
+
+def checkin_card(card, now):
+    """The midday card as a small corner check-in: what is still open today, with the same Clear / Track / Move."""
+    c = dict(card)
+    n = sum(len(s.get("items") or []) for s in c.get("sections") or [])
+    c["eyebrow"] = f"Check-in · {now:%H:%M}"
+    if n:
+        c["title"] = f"{plural(n, 'quest')} left today"
+        c["subtitle"] = "Pick one and do its 2-minute start."
+    c["display"] = "compact"
+    c["timeoutSec"] = 900
+    return c
+
+
+def checkin(now, args, manual=False):
+    """Every 2 hours from 09:00 to 21:00 (run by the catch-up agent, live mode only): a small card with today's open
+    quests, so you can see where the day stands and change a quest without opening Notion. Only while you are at the
+    Mac, never on top of another card, never in the hour before a scheduled card, and not when nothing is left."""
+    why = checkin_skip(now)
+    if why and not manual:
+        return 0
+    if not manual and not args.dry_run and not args.force and qlstate.mode() != "live":
+        return 0
+    if not manual and not qlstate.user_present():
+        log("checkin: due, waiting until you are back at the Mac")
+        return 0
+    if not manual and qlstate.card_open():
+        log("checkin: due, a card is open")
+        return 0
+    if not qlstate.claim(now.date(), "checkin", ttl=300):
+        return 0
+    try:
+        try:
+            card = make_card("midday", now.date(), args.dry_run)
+        except Exception as e:  # noqa: BLE001  a check-in is a nudge: no error card, the next tick tries again
+            log(f"checkin: {e}")
+            return 1
+        if args.dry_run:
+            print(json.dumps(checkin_card(card, now), ensure_ascii=False, indent=1))
+            return 0
+        qlstate._write_atomic(os.path.join(RUNS, "checkin.last"), now.isoformat(timespec="seconds"))
+        if not card.get("sections"):
+            log("checkin: nothing left today")
+            return 0
+        card = checkin_card(card, now)
+        path = os.path.join(RUNS, "checkin.json")
+        write_json(path, card)
+        subprocess.run([sys.executable, SHOW, path, "--no-stamp", "--source", "local"], check=False, timeout=60)
+        log(f"checkin: shown at {now:%H:%M}: {card.get('title', '')}")
+        return 0
+    finally:
+        qlstate.release(now.date(), "checkin")
+
+
 def catchup(args):
     """After sleep, a shutdown or a late login: write queued clicks to Notion, then show the one card that is due and
-    unseen, once the user is back."""
+    unseen, once the user is back; with nothing due, maybe a check-in card (every 2 hours, 09:00–21:00)."""
     now = _at(args)
     if not args.dry_run:
         sync_queue()                              # any mode: a click must reach Notion without Claude
@@ -965,7 +1081,7 @@ def catchup(args):
     wanted = qlstate.due(now)
     if not wanted:
         log("catchup: nothing due")
-        return 0
+        return 0 if args.dry_run else checkin(now, args)
     mode = qlstate.mode()
     latest = wanted[-1]
     older = wanted[:-1]
@@ -1262,8 +1378,61 @@ def uninstall():
     return 0
 
 
-def main_add(rest):
+def parse_today_line(line):
+    """'* Finish the report | open the draft' -> (title, is_main, two_minute_start). A leading * (or ⭐) makes it a
+    ⭐ Main Quest, otherwise a 🧩 Side Quest; text after " | " is its 2-minute start."""
+    line = line.strip()
+    main = line.startswith(("*", "⭐"))
+    line = line.lstrip("*⭐ \t").strip()
+    title, _, start = line.partition(" | ")
+    return title.strip(), main, start.strip()
+
+
+def add_today_cmd(rest, args):
+    """`report.py add-today -- "Buy batteries | check which size first"`: a quest dated today (the menu bar's "Add quest
+    for today…"), then the menu bar's list is refreshed. Exit 0 = added, 2 = empty line, 3 = no Notion token,
+    1 = Notion said no (the message is on stderr)."""
+    title, main, start = parse_today_line(" ".join(rest))
+    if not title:
+        print("Type the quest, for example: Buy batteries | check which size first", file=sys.stderr)
+        return 2
+    T = _at(args).date()
+    props = {
+        "Quest": {"title": [{"text": {"content": title}}]},
+        "Type": {"select": {"name": MAIN if main else SIDE}},
+        "Status": {"status": {"name": TODO}},
+        "Energy": {"select": {"name": "🐸 Mobs"}},
+        "Date": {"date": {"start": T.isoformat()}},
+    }
+    if start:
+        props["2-Min Start"] = {"rich_text": [{"text": {"content": start}}]}
+    if args.dry_run:
+        print(json.dumps({"title": title, "type": props["Type"]["select"]["name"], "date": T.isoformat(), "start": start},
+                         ensure_ascii=False))
+        return 0
+    token = read_token()
+    if not token:
+        print("The Notion token is not saved yet, so I can't create the quest.", file=sys.stderr)
+        return 3
+    global INTERACTIVE
+    INTERACTIVE = True
+    try:
+        notion(token, "POST", "/pages", {"parent": {"database_id": QUESTS_DB}, "icon": {"type": "emoji", "emoji": "⭐" if main else "🧩"},
+                                         "properties": props})
+    except NotionError as e:
+        hint = (" Give the integration the Insert content capability (Notion, Settings, Connections, your integration)."
+                if e.code in (401, 403) else "")
+        print(f"Notion said no: {e}.{hint}", file=sys.stderr)
+        return 1
+    log(f"add-today: {title!r}" + (" (main)" if main else ""))
+    refresh_deadlines()
+    print(f"Added for today: {'⭐ ' if main else ''}{title}")
+    return 0
+
+
+def main_add(rest, cmd=None):
     """`add [--dry-run] [--at "YYYY-MM-DD HH:MM"] [--] TEXT…`, read by hand: the text is free-form and may start with a dash."""
+    cmd = cmd or add_cmd
     ns = argparse.Namespace(dry_run=False, at=None)
     while rest and rest[0] in ("--dry-run", "--at"):
         if rest[0] == "--dry-run":
@@ -1274,15 +1443,17 @@ def main_add(rest):
             sys.exit("--at needs a value")
     if rest and rest[0] == "--":
         rest = rest[1:]
-    return add_cmd(rest, ns)
+    return cmd(rest, ns)
 
 
 def main(argv):
     if len(argv) > 1 and argv[1] == "add":
         return main_add(argv[2:])
+    if len(argv) > 1 and argv[1] == "add-today":
+        return main_add(argv[2:], add_today_cmd)
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter, usage=argparse.SUPPRESS)
     ap.add_argument("cmd", choices=["morning", "midday", "evening", "shadow", "compare", "install", "uninstall", "check",
-                                    "now", "catchup", "gate", "status", "refresh", "urgent", "apply"])
+                                    "now", "catchup", "checkin", "gate", "status", "refresh", "urgent", "apply"])
     ap.add_argument("rest", nargs="*")
     ap.add_argument("--dry-run", action="store_true")
     ap.add_argument("--today")
@@ -1301,6 +1472,8 @@ def main(argv):
         return now_cmd(args.rest, args)
     if args.cmd == "catchup":
         return catchup(args)
+    if args.cmd == "checkin":   # by hand: show the check-in card now, whatever the clock says (--dry-run prints it)
+        return checkin(_at(args), args, manual=True)
     if args.cmd == "gate":
         if not args.rest or args.rest[0] not in (*BUILD, "weekly"):
             ap.error("gate needs morning|midday|evening|weekly")

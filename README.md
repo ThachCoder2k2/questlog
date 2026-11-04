@@ -21,9 +21,12 @@ quest, and nothing to remember: the cards come to you.
 
 - **Three cards a day**: 07:30 morning briefing (today's quests), 12:00 midday check (what is left), 22:00 evening
   report (cleared count, ⭐ done or not, day streak, tomorrow's plan).
+- **Check-ins every 2 hours** (09:00–21:00): a small corner card with what is still open today, only while you are
+  at the Mac.
 - **Act on the card**: Clear, Track (🔥 in progress), Move to tomorrow, Undo, Open in Notion, with the keyboard or the mouse.
 - **Detail panel** for each quest: illustration, questline goal, next 2-minute step, questline log.
-- **Menu-bar button**: opens the card any time (⌃⌥Q), lists today's quests with quick actions, shows a tracking timer.
+- **Menu-bar button**: opens the card any time (⌃⌥Q), lists today's quests with quick actions (kept in sync with
+  Notion every 10 minutes), adds a quest for today in one line, undoes the last change, shows a tracking timer.
 - **Deadlines**: give a quest a Due time and it climbs a ladder of reminders (badge → card → alert sound), with an
   optional push to your phone while you are away.
 - **Works offline**: a click that can't reach Notion waits in a local queue and is sent as soon as the network is back.
@@ -107,9 +110,11 @@ Just want to look at the design? Open `card.html` in Safari with `?kind=morning`
 | Morning briefing | 07:30 | 07:00 and 11:30 |
 | Midday check | 12:00 | 11:30 and 21:30 |
 | Evening report | 22:00 | 21:30 and 04:00 (after midnight it is still the previous day's report) |
+| Check-in (corner card) | every 2 hours | 09:00 and 21:00, when no card was on screen for 2 hours and quests are still open |
 
 If the Mac was asleep, off or you were away, the card shows once you are back, never stacked and never on top of an
-open card.
+open card. A check-in also skips the hour before a scheduled card. Change the rhythm in `report.py`
+(`CHECKIN_EVERY`, `CHECKIN_HOURS`).
 
 **Controls**
 
@@ -129,8 +134,15 @@ Keys work only after you click the card once, so typing in another app never rea
 The card opens full screen; `"display": "compact"` in its data opens it as the corner card.
 
 **Menu-bar button**: click or ⌃⌥Q opens the card for the time of day (or the last saved one when offline).
-Right-click for today's quests (Clear · Track · Move to tomorrow · Open), the other cards, "Add deadline…" (⌃⌥D) and
-the board. Next to the icon: today's cleared/total, or "▶ 12m" while a quest is tracked, or "!" when a deadline is close.
+Right-click for:
+- today's quests, each with Clear · Track · To do · Move to tomorrow · Open in Notion (the list is re-read from Notion
+  every 10 minutes and right after each change);
+- **↶ Undo** (⌘Z while the menu is open) for the last change made in the menu, for 30 minutes;
+- **Add quest for today…**: one line, e.g. `Buy batteries | check which size first` (text after ` | ` is the 2-minute
+  start; `*` in front makes it a ⭐ Main quest);
+- the other cards, "Add deadline…" (⌃⌥D) and the board.
+
+Next to the icon: today's cleared/total, or "▶ 12m" while a quest is tracked, or "!" when a deadline is close.
 
 **Deadlines**: give a quest a **Due** date and time in Notion, or type one line in "Add deadline…", for example
 `Pay rent, fri 17:00` or `Call the bank in 3h`.
@@ -204,9 +216,12 @@ next morning card.
 | `… --dry-run` | print the card JSON only: no Notion writes, queue untouched, no card |
 | `… --today 2026-10-21` | build the card for another day |
 | `python3 report.py now [KIND]` | open a card now (what the menu-bar button runs) |
-| `python3 report.py apply` | write the queued clicks to Notion now |
-| `python3 report.py catchup` | what the 10-minute agent runs: send queued clicks, deadlines, a missed card |
+| `python3 report.py apply` | write the queued clicks to Notion now, then refresh the menu bar's list |
+| `python3 report.py catchup` | what the 10-minute agent runs: send queued clicks, refresh the menu bar, deadlines, a missed card or a check-in |
+| `python3 report.py checkin [--dry-run]` | show the check-in card now |
+| `python3 report.py refresh` | re-read the board for the menu bar (today's list, cleared/total, deadlines) |
 | `python3 report.py add -- "TITLE, WHEN"` | create a deadline quest |
+| `python3 report.py add-today -- "TITLE \| 2-MIN START"` | create a quest for today (`*` in front = ⭐ Main) |
 | `python3 report.py status` | mode, token, which cards were shown today, saved cards |
 | `python3 report.py check` | token, Notion access, row counts |
 | `python3 report.py install [--live]` / `uninstall` | LaunchAgents in `~/Library/LaunchAgents/com.questlog.*` |

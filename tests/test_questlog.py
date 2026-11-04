@@ -359,12 +359,17 @@ def page(i, title, due, status="📜 To Do", energy=None):
           "Type": {"select": {"name": "⭐ Main Quest"}}, "2-Min Start": {"rich_text": []}}
     if energy: pr["Energy"] = {"select": {"name": energy}}
     return {"id": f"{i:032x}", "properties": pr}
-asked = {}
+asked = []
 report.read_token = lambda: "secret"
-report.query_all = lambda token, db, body=None: (asked.update(body=body), [page(1, "Visa form", "2026-10-21T17:00:00.000+07:00"), page(2, "Locked one", "2026-10-21", energy="🔒 Locked")])[1]
+def _board(token, db, body=None):
+    asked.append(db)
+    if db != report.QUESTS_DB: return []
+    return [page(1, "Visa form", "2026-10-21T17:00:00.000+07:00"), page(2, "Locked one", "2026-10-21", energy="🔒 Locked")]
+report.query_all = _board
 report.refresh_deadlines = _real_refresh
 reset(); rc = report.refresh_deadlines()
-got = urgent.load(); check("refresh: writes urgent.json (Locked skipped), filter asks for open quests with a Due", rc == 0 and [g["title"] for g in got] == ["Visa form"] and "Due" in json.dumps(asked["body"]), (got, asked))
+got = urgent.load(); check("refresh: reads the board once, writes urgent.json (Locked skipped)", rc == 0 and [g["title"] for g in got] == ["Visa form"] and asked.count(report.QUESTS_DB) == 1, (got, asked))
+check("  and the menu bar's today list", os.path.exists(f"{RUNS}/today.json"))
 report.read_token = lambda: None; check("refresh without a token: quiet no-op", report.refresh_deadlines() == 0 and len(urgent.load()) == 1)
 r = report.quest_row(page(3, "X", "2026-10-21T08:00:00.000+07:00"))
 it = report.item(dict(r, type="⭐ Main Quest", questlines=[]), {"questlines": {}}, [])
@@ -584,6 +589,56 @@ check("back online: the next catch-up PATCHes the page's Status", patched == [("
 check("  the queue is empty and applied.json has it (the evening stats read it)",
       json.load(open(_pending.QUEUE))["actions"] == [] and any(e["id"] == "d" * 32 and e["status"] == "✅ Cleared" for e in json.load(open(_pending.LEDGER))["applied"]))
 report.notion = real_notion; report.read_token = lambda: None; _queue([])
+
+print("== check-in card (every 2 hours, 09:00-21:00, while you are at the Mac)")
+real_last, real_make = report.last_card_at, report.make_card
+report.last_card_at = lambda: None
+check("08:30: before the check-in hours", report.checkin_skip(at(f"{D} 08:30")) is not None)
+check("11:10: the midday card comes within the hour", "midday" in (report.checkin_skip(at(f"{D} 11:10")) or ""))
+check("14:00, no card shown yet today: may show", report.checkin_skip(at(f"{D} 14:00")) is None)
+check("21:00: after the check-in hours", report.checkin_skip(at(f"{D} 21:00")) is not None)
+report.last_card_at = lambda: at(f"{D} 12:30")
+check("14:00 after a card at 12:30: waits", report.checkin_skip(at(f"{D} 14:00")) is not None)
+check("14:31, two hours later: may show", report.checkin_skip(at(f"{D} 14:31")) is None)
+report.last_card_at = lambda: at(f"{D} 18:00")
+check("a card stamped later than now (clock change) counts as recent", report.checkin_skip(at(f"{D} 14:31")) is not None)
+open_items = [{"type": "main", "title": "Write the report", "url": "https://app.notion.com/p/" + "a" * 32, "status": "📜 To Do"}]
+report.make_card = lambda kind, T, dry, *a, **k: card("midday", "1 quest left for tonight", sections=[{"items": open_items}])
+report.last_card_at = lambda: at(f"{D} 12:00")
+reset(); qlstate.set_mode("live"); qlstate.mark(date(2026, 10, 20), "midday")
+report.catchup(ns(at=f"{D} 14:10")); s = shown()
+check("catch-up at 14:10, live, nothing due, last card 12:00: one check-in card", len(s) == 1, s)
+c = json.load(open(s[0])) if s else {}
+check("  a compact corner card: 'Check-in · 14:10', '1 quest left today'", c.get("display") == "compact" and c.get("eyebrow") == "Check-in · 14:10" and c.get("title") == "1 quest left today", c)
+check("  it stamps no daily slot", not any(f.endswith(".shown") and "checkin" in f for f in os.listdir(RUNS)))
+report.last_card_at = real_last
+report.catchup(ns(at=f"{D} 14:20")); check("10 minutes later: no second check-in", len(shown()) == 1)
+report.last_card_at = lambda: at(f"{D} 12:00")
+reset(); qlstate.set_mode("shadow"); qlstate.mark(date(2026, 10, 20), "midday")
+report.catchup(ns(at=f"{D} 14:10")); check("shadow mode: no check-in", shown() == [])
+reset(); qlstate.set_mode("live"); qlstate.mark(date(2026, 10, 20), "midday"); qlstate.card_open = lambda: True
+report.catchup(ns(at=f"{D} 14:10")); check("a card is open: no check-in", shown() == [])
+qlstate.card_open = lambda: False; qlstate.idle_seconds = lambda: 5000.0
+report.catchup(ns(at=f"{D} 14:10")); check("you are away: no check-in", shown() == [])
+qlstate.idle_seconds = lambda: 30.0
+report.make_card = lambda kind, T, dry, *a, **k: card("midday", "All clear for today!", sections=[])
+report.catchup(ns(at=f"{D} 14:10")); check("nothing left today: no card, but the time is noted", shown() == [] and os.path.exists(f"{RUNS}/checkin.last"))
+report.last_card_at, report.make_card = real_last, real_make
+
+print("== add a quest for today (menu bar)")
+check("plain line: a side quest", report.parse_today_line("Buy batteries") == ("Buy batteries", False, ""))
+check("'* ' makes it main, ' | ' starts the 2-minute start", report.parse_today_line("* Finish the report | open the draft") == ("Finish the report", True, "open the draft"))
+check("a slash in the title stays", report.parse_today_line("Fix sidebar UI/UX") == ("Fix sidebar UI/UX", False, ""))
+out = io.StringIO()
+with contextlib.redirect_stdout(out): rc = report.main(["report.py", "add-today", "--dry-run", "--at", f"{D} 09:00", "--", "* Finish the report | open the draft"])
+j = json.loads(out.getvalue() or "{}")
+check("add-today --dry-run: main quest dated today with its 2-minute start", rc == 0 and j.get("type") == "⭐ Main Quest" and j.get("date") == D and j.get("start") == "open the draft", out.getvalue())
+err = io.StringIO()
+with contextlib.redirect_stderr(err): rc = report.main(["report.py", "add-today", "--", "   "])
+check("an empty line: exit 2", rc == 2)
+report.read_token = lambda: None
+with contextlib.redirect_stderr(io.StringIO()): rc = report.main(["report.py", "add-today", "--", "Buy batteries"])
+check("no token: exit 3", rc == 3)
 
 print("== ledger keeps the title (the bar's tracking timer reads it)")
 import subprocess as sp, tempfile, shutil
