@@ -727,6 +727,82 @@ buf = io.StringIO()
 with contextlib.redirect_stdout(buf): urgent.push_cmd(["sample"])
 check("sample prints the payload without the real topic and without any network call", "<your topic>" in buf.getvalue() and topic not in buf.getvalue(), buf.getvalue())
 
+print("== week goals: the card's Week tab")
+def gpage(gid, title, area="Office", kind="Learn", status="Planned", when="w", result="", quests=()):
+    return {"id": gid, "properties": {"Goal": {"title": [{"plain_text": title}]}, "Area": {"select": {"name": area} if area else None},
+            "Kind": {"select": {"name": kind}}, "Status": {"select": {"name": status}}, "Done when": {"rich_text": [{"plain_text": when}]},
+            "Result": {"rich_text": [{"plain_text": result}] if result else []}, "Quests": {"relation": [{"id": q} for q in quests]}}}
+g = report.goal_row(gpage("aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa", " Study: pick a metric ", kind="Work", status="Next week", quests=["bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb"]))
+check("goal_row: id without dashes, trimmed title, kind lower-cased, quests as ids",
+      g["id"] == "a" * 32 and g["title"] == "Study: pick a metric" and g["kind"] == "work" and g["status"] == "Next week" and g["quests"] == ["b" * 32], g)
+T = date(2026, 11, 19)
+qrow = lambda i, title, status=report.TODO, d="2026-11-17": {"id": f"{i:032x}", "title": title, "type": report.MAIN, "status": status, "date": d, "due": None,
+                                                              "energy": None, "start": "", "questlines": [], "edited": "", "on_today": None}
+wdata = {"rows": [qrow(1, "Read the paper"), qrow(2, "Write notes", report.CLEARED)], "questlines": {},
+         "week_raw": {"monday": "2026-11-16", "areas": ["Lab", "Office", "Learning"], "goals": [
+             report.goal_row(gpage("c" * 32, "Study: pick a metric", kind="Work", quests=[f"{1:032x}", f"{2:032x}", "f" * 32])),
+             report.goal_row(gpage("d" * 32, "Game: playtest", area="Hobby", kind="Odd", status="Accomplished", result="Log written")),
+             report.goal_row(gpage("e" * 32, "", area="Lab"))]}}
+wk = report.week_block(wdata, T)
+check("week_block: label, Monday to Sunday, today and next week", wk and (wk["label"], wk["start"], wk["end"], wk["today"], wk["next"]) ==
+      ("Week 47", "2026-11-16", "2026-11-22", "2026-11-19", "Week 48"), wk and {k: wk[k] for k in ("label", "start", "end", "today", "next")})
+check("week_block: columns follow Notion's Area order, unused areas left out, unknown ones added at the end", wk and wk["areas"] == ["Office", "Hobby"], wk and wk["areas"])
+check("week_block: untitled goals are skipped; Status and Kind mapped", wk and [(x["short"], x["status"], x["kind"], x["result"]) for x in wk["goals"]] ==
+      [("Study", "planned", "work", ""), ("Game", "accomplished", "work", "Log written")], wk and wk["goals"])
+qs = wk["goals"][0]["quests"] if wk else []
+check("week_block: the goal's quests, done when Cleared, missing pages dropped", [(q["title"], q.get("done", False), q["url"][-32:]) for q in qs] ==
+      [("Read the paper", False, f"{1:032x}"), ("Write notes", True, f"{2:032x}")], qs)
+check("week_block: goals read for another week are not shown", report.week_block(dict(wdata, week_raw=dict(wdata["week_raw"], monday="2026-11-09")), T) is None)
+check("week_block: no goals, no Week tab", report.week_block(dict(wdata, week_raw=dict(wdata["week_raw"], goals=[])), T) is None and report.week_block({"rows": []}, T) is None)
+c = report.with_week({"kind": "midday"}, wdata, T)
+check("with_week: the card gets its week", c.get("week", {}).get("label") == "Week 47")
+check("with_week: a broken week block never costs the card", report.with_week({"kind": "midday"}, {"rows": None, "week_raw": wdata["week_raw"]}, T) == {"kind": "midday"})
+def notion_404(token, method, path, body=None, tries=4): raise report.NotionError(404, "Could not find database")
+real_notion = report.notion; report.notion = notion_404
+check("fetch_week: an unreadable database gives no week, no error", report.fetch_week("secret", T) is None)
+week_asked = []
+prev_query_all = report.query_all   # an earlier section left its board stub here
+report.query_all = lambda token, db, body=None: week_asked.append(("query", db, body)) or [gpage("c" * 32, "Study: pick a metric")]
+report.notion = lambda token, method, path, body=None, tries=4: week_asked.append((method, path, body)) or {
+    "properties": {"Area": {"select": {"options": [{"name": "Lab"}, {"name": "Office"}]}}}}
+fw = report.fetch_week("secret", T)
+check("fetch_week: this week's Monday, the goals and the Area order",
+      fw == {"monday": "2026-11-16", "areas": ["Lab", "Office"], "goals": [report.goal_row(gpage("c" * 32, "Study: pick a metric"))]}
+      and week_asked[0] == ("query", report.WEEK_DB, {"filter": {"property": "Week", "date": {"equals": "2026-11-16"}},
+                                                     "sorts": [{"timestamp": "created_time", "direction": "ascending"}]}), (fw, week_asked))
+report.query_all = prev_query_all
+
+print("== week goals: claims written back to Notion")
+def claim(ms, gid, status, result=""):
+    os.makedirs(report.GOAL_CLAIMS, exist_ok=True)
+    json.dump({"id": gid, "status": status, "result": result, "title": "goal " + gid[:4], "at": "x"}, open(os.path.join(report.GOAL_CLAIMS, f"{ms:013d}-{gid}.json"), "w"))
+reset(); patched = []
+claim(1000, "c" * 32, "Accomplished", "Picked the first metric"); claim(2000, "c" * 32, "Planned"); claim(1500, "d" * 32, "Accomplished", "Log written")
+open(os.path.join(report.GOAL_CLAIMS, "0000000000500-broken.json"), "w").write("{nope")
+report.notion = lambda token, method, path, body=None, tries=4: patched.append((method, path, body)) or {}
+report._apply_goal_claims("secret")
+byp = {p[1]: p[2]["properties"] for p in patched}
+check("claims: the newest click per goal wins; Result only with Accomplished",
+      byp == {"/pages/" + "c" * 32: {"Status": {"select": {"name": "Planned"}}},
+              "/pages/" + "d" * 32: {"Status": {"select": {"name": "Accomplished"}}, "Result": {"rich_text": [{"type": "text", "text": {"content": "Log written"}}]}}}, patched)
+check("claims: written ones and unreadable ones are removed", os.listdir(report.GOAL_CLAIMS) == [])
+reset(); claim(3000, "c" * 32, "Accomplished", "x")
+report.notion = lambda token, method, path, body=None, tries=4: (_ for _ in ()).throw(report.NotionError(0, "unreachable"))
+report._apply_goal_claims("secret")
+check("claims: Notion unreachable, the claim waits for the next run", len(os.listdir(report.GOAL_CLAIMS)) == 1)
+reset(); claim(3000, "c" * 32, "Done")
+report._apply_goal_claims("secret")
+check("claims: a status the card may not set is dropped", os.listdir(report.GOAL_CLAIMS) == [])
+reset(); claim(4000, "c" * 32, "Accomplished", "x"); synced = []
+real_apply_q, real_tok = report.apply_queue, report.read_token
+report.apply_queue = lambda token: synced.append(token); report.read_token = lambda: "secret"
+report.sync_queue()
+check("catch-up: a goal claim alone is enough to send the queue", synced == ["secret"], synced)
+report.apply_queue, report.read_token = real_apply_q, real_tok
+reset(); synced.clear(); report.apply_queue = lambda token: synced.append(token); report.sync_queue(); report.apply_queue = real_apply_q
+check("catch-up: nothing queued, nothing sent", synced == [])
+report.notion = real_notion
+
 print("== status")
 reset(); report.status_cmd()
 print(f"\n{ok} passed, {fail} failed")

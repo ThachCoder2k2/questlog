@@ -63,6 +63,9 @@ flowchart LR
 | Deadlines | `urgent.py`, `quickadd.py` | reminder ladder, phone push, "Add deadline…" |
 | State | `qlstate.py`, `runs/` | which card was shown when, saved cards for offline use, logs |
 | Sounds | `make_sounds.py` → `sounds/*.wav` | original menu sounds, synthesized in Python |
+| Card source | `cardsrc/` → `make_card.py` → `card.html` | the card's parts: the original card, the Today / Week / Study tabs, the two themes |
+| Study | `learn.json` (yours), `study.json` (the card writes it) | learning roads, lessons, Recall cards; neither file is in git |
+| Themes | `prefs.json`, `cardsrc/make_theme_sounds.py` → `sounds/lcd`, `sounds/calendar` | the chosen theme and each theme's own sounds |
 
 ## Requirements
 
@@ -83,9 +86,10 @@ flowchart LR
    swiftc -O QuestCard.swift -o questcard -framework Cocoa -framework WebKit
    swiftc -O QuestBar.swift -o questbar -framework Cocoa -framework Carbon
    python3 make_sounds.py
+   python3 cardsrc/make_theme_sounds.py
    ```
 3. **Create the Notion databases** ([Notion setup](#notion-setup)) and put their IDs in the code:
-   `QUESTS_DB` and `QUESTLINES_DB` in `report.py`, and your board page in `boardURL` (`QuestCard.swift`, `QuestBar.swift`)
+   `QUESTS_DB`, `QUESTLINES_DB` and `WEEK_DB` in `report.py`, and your board page in `boardURL` (`QuestCard.swift`, `QuestBar.swift`)
    and `BOARD` (`show_card.py`). Rebuild after changing the Swift files.
 4. **Connect Notion** with an integration token: [Saving "done" to Notion](#saving-done-to-notion). Then check it:
    ```bash
@@ -100,7 +104,8 @@ flowchart LR
 6. **Try it:** click the button in the menu bar, or run `python3 report.py now`.
 
 Just want to look at the design? Open `card.html` in Safari with `?kind=morning`, `midday`, `evening`, `weekly` or
-`urgent` at the end of the address: it shows sample data and needs nothing else.
+`urgent` at the end of the address: it shows sample data and needs nothing else. Add `&theme=lcd` or
+`&theme=calendar` to see the two themes.
 
 ## Using it
 
@@ -196,6 +201,19 @@ Check it with `python3 report.py check`. Remove it with `security delete-generic
 
 **Questlines** database: `Questline` (title), `Done means` (text, shown as the questline goal), `Quests` (relation).
 
+**Week Goals** database (the card's Week tab; optional: without it the tab stays hidden)
+
+| property | type | values |
+|---|---|---|
+| Goal | title | `Short name: what the week must produce`; the part before `:` is the short name |
+| Week | date | the Monday of the week |
+| Area | select | one column per area on the card, in the order of the options |
+| Kind | select | `Learn`, `Work`, `Build`, `Life`: sets the question asked when you claim it |
+| Done when | text | what is true when the goal is met |
+| Status | select | `Planned`, `Accomplished` (set from the card), `Next week` (moved) |
+| Result | text | your one line, written on the card when you claim it |
+| Quests | relation → Quests | the quests that get you there |
+
 Quests without a Date sit on a "Quest Board" backlog. Each questline can have its own illustration: add a banner, a
 tile and a name pattern to `ART` in `card.html`; other quests get the Main / Side / Fun default art.
 
@@ -282,6 +300,8 @@ like a password; set `"titles": false` in `push.json` to send no quest titles or
 | display | `"full"` \| `"compact"` | full screen (default) or corner card |
 | timeoutSec | number | auto-close, default 1800 |
 | sound | string | `""` mutes the card |
+| week | `{label, start, end, today, next, areas, goals}` | optional: the Week tab; `goals` = `[{id, area, kind, short, title, when, status, result, quests}]`, `status` is `planned`, `accomplished` or `moved`, `quests` are items |
+| tab | `"week"` \| `"learn"` | optional: the tab the card opens on |
 
 Item: `{type: "main"|"side"|"fun", title, url?, status?, date?, label?, tags?, live?, done?, start?, questline?, goal?, energy?, steps?}`
 
@@ -291,6 +311,62 @@ Item: `{type: "main"|"side"|"fun", title, url?, status?, date?, label?, tags?, l
 
 Sounds: put your own files in `sounds/custom/` (same names as in `sounds/`, `.wav` `.aiff` `.caf` `.m4a` `.mp3`) to
 replace the built-in ones; they stay on your Mac (`.gitignore`).
+</details>
+
+<details>
+<summary><b>Card source, Study tab and themes</b></summary>
+
+`card.html` is built from `cardsrc/`. Edit the files there, then rebuild:
+
+```bash
+python3 cardsrc/make_card.py
+```
+
+| file | what it is |
+|---|---|
+| `cardsrc/base.html` | the card before the tabs and themes |
+| `cardsrc/v4.css`, `cardsrc/v4.js` | Today / Week / Study, Recall, the roads, Boss, light day |
+| `cardsrc/themes.js` | what the themes share: pictograms, minute cells, the words map, and `THEME_EXT`, where a theme registers its words, decorations, Done moment and sounds |
+| `cardsrc/theme_lcd.css`, `theme_cal.css` | Pocket LCD and Tear-off calendar |
+| `cardsrc/theme_<key>.css`, `theme_<key>.js` | one file pair per later theme (`board`, `soft`, `mac`); a theme is in the picker once its CSS exists |
+| `cardsrc/make_themes.py`, `make_card.py` | put it together; nothing personal goes into `card.html` |
+
+`python3 cardsrc/make_card.py --themes board --out /tmp/card.html` builds a card with only that later theme (the
+others left out), which is handy while one theme is being worked on.
+
+**Study tab.** It shows only when `learn.json` exists next to `report.py`. The app reads it each time a card opens.
+Shape (all keys used by the card):
+
+```json
+{
+  "tracks": [{
+    "id": "cv", "name": "Computer vision", "short": "Vision",
+    "sessions": [{ "title": "…", "minutes": 45, "min": "2-minute start", "done": "done when…", "recall": "a question" }],
+    "milestones": [{ "name": "…", "reached_when": "…", "sessions": [1, 2, 3] }]
+  }],
+  "rhythm": { "Mon": ["cv"], "Tue": ["cv"] }, "max_pins": 3,
+  "recall_cap": 20, "recall_retention": 0.9, "recall_leech": 4, "recall_valve": [15, 0.85]
+}
+```
+
+`rhythm` is the road suggested for each day. Milestone `sessions` are 1-based indexes into the track's `sessions`.
+Recall shows at most `recall_cap` cards a day and aims for `recall_retention`; if the last 30 days averaged more than
+15 cards a day, it aims for 0.85 instead (`recall_valve`). A card forgotten `recall_leech` times asks you to rewrite it or park it.
+
+`study.json` is written by the card after every change: where you are on each road, tomorrow's pins, today's lessons,
+Recall cards with their next date, and the line you wrote after each lesson. Delete it to start over. Today's lessons
+and Recall also sit on top of the Today list; marking them done never writes to Notion. The 22:00 card opens on Study
+until a lesson is pinned for tomorrow.
+
+**Week tab.** Shows this week's goals from the Week Goals database ([Notion setup](#notion-setup)), one column per area,
+each with the quests that get you there. A goal whose quests are all cleared says "Claim it": press D, write one line,
+Enter. The claim goes to `runs/goal-claims/` and `report.py apply` writes it to the goal's page (Status and Result);
+the 10-minute catch-up retries anything that could not be sent. D on a claimed goal takes it back. Enter opens the goal
+in Notion. No goals this week, no Week tab.
+
+**Themes.** Press O (or the palette button) on the card: ↑↓ previews, Enter keeps, Esc goes back; the mouse picks with a
+click. The choice is saved in `prefs.json` and switches the sounds too: `sounds/<theme>/`, made by
+`cardsrc/make_theme_sounds.py`. The app loads every folder in `sounds/` (except `custom`) as a theme's pack.
 </details>
 
 <details>
@@ -309,4 +385,4 @@ real state and sends nothing to Notion or ntfy.sh.
 
 A fan-made personal project inspired by the menu style of *The Legend of Zelda: Tears of the Kingdom*. Not affiliated
 with or endorsed by Nintendo. No game assets are used: every illustration is original SVG drawn in `card.html`, and
-every sound is synthesized by `make_sounds.py`.
+every sound is synthesized by `make_sounds.py` and `cardsrc/make_theme_sounds.py`.

@@ -113,6 +113,9 @@ final class CardController: NSObject, NSApplicationDelegate, WKScriptMessageHand
 
     // Menu sounds, preloaded; the short ones get a few copies so quick cursor moves can overlap.
     var sfx: [String: [NSSound]] = [:]
+    var packs: [String: [String: [NSSound]]] = [:]   // a theme's own sounds: sounds/<pack>/<name>.wav
+    var pack = ""                                    // the current theme's pack ("" = the sounds above)
+    var appDir: URL { htmlURL.deletingLastPathComponent() }
     var soundsOn: Bool { soundName != nil && soundName != "" }
 
     /// sounds/custom/<name>.<ext> (the user's own files) wins over the built-in sounds/<name>.wav.
@@ -120,18 +123,39 @@ final class CardController: NSObject, NSApplicationDelegate, WKScriptMessageHand
         let dir = htmlURL.deletingLastPathComponent().appendingPathComponent("sounds")
         let custom = dir.appendingPathComponent("custom")
         let fm = FileManager.default
-        for (name, copies) in [("open", 1), ("move", 4), ("scroll", 4), ("select", 2), ("done", 2), ("undo", 2), ("cancel", 2), ("track", 2), ("untrack", 2), ("close", 1), ("alert", 1)] {
+        let names = [("open", 1), ("move", 4), ("scroll", 4), ("select", 2), ("done", 2), ("undo", 2), ("cancel", 2), ("track", 2), ("untrack", 2), ("close", 1), ("alert", 1)]
+        for (name, copies) in names {
             let mine = ["wav", "aiff", "aif", "caf", "m4a", "mp3"].map { custom.appendingPathComponent(name + "." + $0) }
                 .first { fm.fileExists(atPath: $0.path) }
             let url = mine ?? dir.appendingPathComponent(name + ".wav")
             let pool = (0..<copies).compactMap { _ in NSSound(contentsOf: url, byReference: true) }
             if !pool.isEmpty { sfx[name] = pool }
         }
+        let packNames = ((try? fm.contentsOfDirectory(atPath: dir.path)) ?? []).filter { p in   // the themes' packs: sounds/<theme>/ (cardsrc/make_theme_sounds.py)
+            var isDir: ObjCBool = false
+            return p != "custom" && !p.hasPrefix(".") && fm.fileExists(atPath: dir.appendingPathComponent(p).path, isDirectory: &isDir) && isDir.boolValue
+        }
+        for p in packNames {
+            for (name, copies) in names {
+                let url = dir.appendingPathComponent(p).appendingPathComponent(name + ".wav")
+                guard fm.fileExists(atPath: url.path) else { continue }
+                let pool = (0..<copies).compactMap { _ in NSSound(contentsOf: url, byReference: true) }
+                if !pool.isEmpty { packs[p, default: [:]][name] = pool }
+            }
+        }
+    }
+
+    /// "lcd/move" plays from that pack; a plain name plays from the current theme's pack, else the default sounds.
+    func pool(for name: String) -> [NSSound]? {
+        let parts = name.split(separator: "/", maxSplits: 1).map(String.init)
+        if parts.count == 2 { return packs[parts[0]]?[parts[1]] ?? sfx[parts[1]] }
+        if !pack.isEmpty, let p = packs[pack]?[name] { return p }
+        return sfx[name]
     }
 
     func play(_ name: String) {
         guard soundsOn else { return }
-        if let pool = sfx[name] {
+        if let pool = pool(for: name) {
             let sound = pool.first(where: { !$0.isPlaying }) ?? pool[0]
             if sound.isPlaying { sound.stop() }
             sound.play()
@@ -159,7 +183,18 @@ final class CardController: NSObject, NSApplicationDelegate, WKScriptMessageHand
         let controller = WKUserContentController()
         controller.add(self, name: "ql")
         let maxHeight = Int(targetScreen().visibleFrame.height - 40)
-        let env = "{\"notion\": \(token != nil), \"queue\": true, \"maxHeight\": \(maxHeight), \"mode\": \"\(mode)\"}"
+        var envObj: [String: Any] = ["notion": token != nil, "queue": true, "maxHeight": maxHeight, "mode": mode]
+        let readJSON = { (file: String) -> Any? in
+            guard let data = try? Data(contentsOf: self.appDir.appendingPathComponent(file)) else { return nil }
+            return try? JSONSerialization.jsonObject(with: data)
+        }
+        if let learn = readJSON("learn.json") { envObj["learn"] = learn }   // the learning roads (yours, kept local)
+        if let study = readJSON("study.json") { envObj["study"] = study }   // your progress on them
+        if let prefs = readJSON("prefs.json") as? [String: Any], let theme = prefs["theme"] as? String {
+            envObj["theme"] = theme; pack = packs[theme] != nil ? theme : ""
+        }
+        let envData = (try? JSONSerialization.data(withJSONObject: envObj, options: [])) ?? Data("{}".utf8)
+        let env = String(data: envData, encoding: .utf8) ?? "{}"
         controller.addUserScript(WKUserScript(source: "window.QL_DATA = \(json); window.QL_ENV = \(env);",
                                               injectionTime: .atDocumentStart, forMainFrameOnly: true))
         let config = WKWebViewConfiguration()
@@ -542,7 +577,7 @@ final class CardController: NSObject, NSApplicationDelegate, WKScriptMessageHand
             requestStatus(id: body["id"] as? String ?? "", status: body["status"] as? String ?? "", date: body["date"] as? String,
                           title: body["title"] as? String ?? "", revert: body["revert"] as? Bool ?? false)
         case "sfx":
-            if let name = body["name"] as? String, sfx[name] != nil { play(name) }
+            if let name = body["name"] as? String, pool(for: name) != nil { play(name) }
         case "snooze":   // the urgent card: hold the deadline alerts (urgent.py keeps the snooze), then close
             guard !closing else { return }
             let minutes = min(max((body["minutes"] as? NSNumber)?.intValue ?? 15, 1), 240)
@@ -555,6 +590,35 @@ final class CardController: NSObject, NSApplicationDelegate, WKScriptMessageHand
             dismiss()
         case "close":
             dismiss()
+        case "study":   // the Study tab's progress (road positions, pins, Recall cards): study.json, kept local
+            if let state = body["state"], JSONSerialization.isValidJSONObject(state),
+               let data = try? JSONSerialization.data(withJSONObject: state, options: [.sortedKeys]) {
+                try? data.write(to: appDir.appendingPathComponent("study.json"), options: .atomic)
+            }
+        case "goal":   // a Week goal claimed (or taken back) on the card: one file in runs/goal-claims, sent by report.py apply
+            let id = (body["id"] as? String ?? "").lowercased()
+            let status = body["status"] as? String ?? ""
+            guard id.range(of: "^[0-9a-f]{32}$", options: .regularExpression) != nil, ["Accomplished", "Planned"].contains(status) else { return }
+            let dir = appDir.appendingPathComponent("runs").appendingPathComponent("goal-claims")
+            try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+            let claim: [String: Any] = ["id": id, "status": status, "result": String((body["result"] as? String ?? "").prefix(2000)),
+                                        "title": body["title"] as? String ?? "", "at": ISO8601DateFormatter().string(from: Date())]
+            let ms = Int64(Date().timeIntervalSince1970 * 1000)
+            if let data = try? JSONSerialization.data(withJSONObject: claim, options: [.sortedKeys]) {
+                try? data.write(to: dir.appendingPathComponent(String(format: "%013lld-%@.json", ms, id)), options: .atomic)
+            }
+            let p = Process()   // not waited for: the 10-minute catch-up sends whatever this run could not
+            p.executableURL = URL(fileURLWithPath: "/usr/bin/python3")
+            p.arguments = [appDir.appendingPathComponent("report.py").path, "apply"]
+            p.standardOutput = FileHandle.nullDevice
+            p.standardError = FileHandle.nullDevice
+            try? p.run()
+        case "theme":   // the theme picked with O: prefs.json, and its sound pack from now on
+            let name = body["name"] as? String ?? "tablet"
+            pack = packs[name] != nil ? name : ""
+            if let data = try? JSONSerialization.data(withJSONObject: ["theme": name], options: []) {
+                try? data.write(to: appDir.appendingPathComponent("prefs.json"), options: .atomic)
+            }
         default:
             break
         }

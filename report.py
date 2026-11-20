@@ -79,6 +79,7 @@ API = "https://api.notion.com/v1"
 NOTION_VERSION = "2022-06-28"
 QUESTS_DB = "3ed39b409ee7481398e1892238e0821a"      # 🗂️ Quest Log Data → Quests (collection://60fcffbd-0336-432e-bd7c-816b68e905a4)
 QUESTLINES_DB = "3e46ad718caa4e06a1830c528b6f96e6"  # 🗂️ Quest Log Data → Questlines (collection://126443f4-aef3-4330-96d7-5b529fd08d22)
+WEEK_DB = "41d207ad5a6f81aa9fe2d3ef70660cff"        # 🗂️ Quest Log Data → Week Goals (collection://41d207ad-5a6f-81a1-88cd-000b42125a2e)
 PAGE = "https://app.notion.com/p/"
 CLAUDE_CARD = "/tmp/questlog-{}-card.json"
 AGENT = "com.questlog.report."
@@ -430,6 +431,140 @@ def fetch(token):
             "rows": [quest_row(pg) for pg in pages], "questlines": qls}
 
 
+# ---------------------------------------------------------------- week goals (the card's Week tab)
+
+GOAL_STATE = {"Accomplished": "accomplished", "Next week": "moved"}   # any other Status reads as planned
+GOAL_KINDS = {"learn", "work", "build", "life"}                       # the question asked when a goal is claimed
+GOAL_SET = {"Accomplished", "Planned"}                                # what the card may write back
+GOAL_CLAIMS = os.path.join(RUNS, "goal-claims")                       # questcard drops one file per claim here
+
+
+def monday(T):
+    return T - timedelta(days=T.weekday())
+
+
+def goal_row(page):
+    p = page.get("properties", {})
+    get = lambda name, kind: (p.get(name) or {}).get(kind)  # noqa: E731
+    name = lambda v: (v or {}).get("name")  # noqa: E731
+    return {
+        "id": page["id"].replace("-", ""),
+        "title": plain(get("Goal", "title")).strip(),
+        "area": (name(get("Area", "select")) or "").strip(),
+        "kind": (name(get("Kind", "select")) or "").strip().lower(),
+        "when": plain(get("Done when", "rich_text")).strip(),
+        "status": name(get("Status", "select")) or "Planned",
+        "result": plain(get("Result", "rich_text")).strip(),
+        "quests": [r["id"].replace("-", "") for r in get("Quests", "relation") or []],
+    }
+
+
+def fetch_week(token, T):
+    """This week's goals (their Week is its Monday) and the Area options in Notion's order, which is the order of the
+    card's columns. None when the database can't be read: the card then simply has no Week tab."""
+    mon = monday(T).isoformat()
+    try:
+        pages = query_all(token, WEEK_DB, {"filter": {"property": "Week", "date": {"equals": mon}},
+                                           "sorts": [{"timestamp": "created_time", "direction": "ascending"}]})
+        db = notion(token, "GET", f"/databases/{WEEK_DB}")
+    except Exception as e:  # noqa: BLE001 - the Week tab must never cost the card
+        log(f"week goals not read: {e}")
+        return None
+    opts = (((db.get("properties") or {}).get("Area") or {}).get("select") or {}).get("options") or []
+    return {"monday": mon, "areas": [o["name"] for o in opts if o.get("name")], "goals": [goal_row(pg) for pg in pages]}
+
+
+def week_item(r, data):
+    """A quest under a goal: enough for the Week tab to tick it, date it and draw its tile."""
+    it = {"type": TYPE.get(r["type"], "side"), "title": r["title"], "url": PAGE + r["id"], "status": r["status"]}
+    if r["status"] == CLEARED:
+        it["done"] = True
+    if r["date"]:
+        it["date"] = r["date"]
+    ql = data["questlines"].get(r["questlines"][0]) if r["questlines"] else None
+    if ql and ql["name"]:
+        it["questline"] = ql["name"]
+    if r["energy"]:
+        it["energy"] = r["energy"]
+    return it
+
+
+def week_block(data, T):
+    """The card's Week tab: this week's goals, one column per area, each with the quests that get you there."""
+    w = data.get("week_raw")
+    mon = monday(T)
+    if not isinstance(w, dict) or w.get("monday") != mon.isoformat():
+        return None
+    by_id = {r["id"]: r for r in titled(data["rows"])}
+    goals = []
+    for g in w.get("goals") or []:
+        title = g.get("title") or ""
+        if not title:
+            continue
+        goals.append({"id": g["id"], "area": g.get("area") or "Other", "kind": g["kind"] if g.get("kind") in GOAL_KINDS else "work",
+                      "short": (title.split(":")[0] if ":" in title else title).strip()[:28], "title": title,
+                      "when": g.get("when") or "", "status": GOAL_STATE.get(g.get("status"), "planned"), "result": g.get("result") or "",
+                      "quests": [week_item(by_id[q], data) for q in g.get("quests") or [] if q in by_id]})
+    if not goals:
+        return None
+    areas = []
+    for a in list(w.get("areas") or []) + [g["area"] for g in goals]:
+        if a not in areas and any(g["area"] == a for g in goals):
+            areas.append(a)
+    nxt = mon + timedelta(days=7)
+    return {"label": f"Week {mon.isocalendar()[1]}", "start": mon.isoformat(), "end": (mon + timedelta(days=6)).isoformat(),
+            "today": T.isoformat(), "next": f"Week {nxt.isocalendar()[1]}", "areas": areas, "goals": goals}
+
+
+def goal_claims_waiting():
+    try:
+        return [n for n in os.listdir(GOAL_CLAIMS) if n.endswith(".json") and not n.startswith(".")]
+    except OSError:
+        return []
+
+
+def _goal_claim(c):
+    return (isinstance(c, dict) and re.fullmatch(r"[0-9a-f]{32}", str(c.get("id", ""))) and c.get("status") in GOAL_SET
+            and isinstance(c.get("result", ""), str))
+
+
+def _apply_goal_claims(token):
+    """Goals claimed (or un-claimed) on the card: Status, plus Result for a claim, on the goal's page. One file per
+    click, named by the click time, so the newest click on a goal wins; a file is removed once Notion has it."""
+    try:
+        names = sorted(n for n in os.listdir(GOAL_CLAIMS) if n.endswith(".json") and not n.startswith("."))
+    except OSError:
+        return
+    latest = {}
+    for n in names:
+        path = os.path.join(GOAL_CLAIMS, n)
+        try:
+            with open(path, encoding="utf-8") as f:
+                c = json.load(f)
+        except (OSError, ValueError):
+            c = None
+        if not _goal_claim(c):
+            log(f"goal claim {n} dropped: not readable")
+            os.remove(path)
+            continue
+        if c["id"] in latest:
+            os.remove(latest[c["id"]][0])   # an older click on the same goal: the newer one replaces it
+        latest[c["id"]] = (path, c)
+    for gid, (path, c) in latest.items():
+        props = {"Status": {"select": {"name": c["status"]}}}
+        if c["status"] == "Accomplished":
+            props["Result"] = {"rich_text": [{"type": "text", "text": {"content": c.get("result", "")[:2000]}}]}
+        try:
+            notion(token, "PATCH", f"/pages/{gid}", {"properties": props})
+        except NotionError as e:
+            log(f"goal {c.get('title') or gid} stays queued: {e}")
+            if e.code in (0, -1):
+                return
+            continue
+        os.remove(path)
+        log(f"applied goal: {c.get('title') or gid} → {c['status']}")
+
+
 # ---------------------------------------------------------------- step 0: card clicks
 
 def queued():
@@ -445,6 +580,7 @@ def apply_queue(token):
 
 
 def _apply_queue_locked(token):
+    _apply_goal_claims(token)
     r = subprocess.run([sys.executable, PENDING, "list"], capture_output=True, text=True, timeout=30)
     try:
         actions = json.loads(r.stdout or "[]")
@@ -717,6 +853,7 @@ def make_card(kind, T, dry, fixture=None, save_fixture=None):
         if not dry:
             apply_queue(token)
         data = fetch(token)
+        data["week_raw"] = fetch_week(token, T)
         if not dry:
             sync_deadlines(data["rows"])
         if save_fixture:
@@ -726,7 +863,19 @@ def make_card(kind, T, dry, fixture=None, save_fixture=None):
         overlay(data["rows"], queued(), extra)
     data["rows"].sort(key=lambda r: (RANK.get(r["type"], 3), r["date"] is None, r["date"] or ""))
     ledger = [e for e in pending.read_json(pending.LEDGER, "applied") if isinstance(e, dict)] + extra
-    return BUILD[kind](data, T, ledger)
+    return with_week(BUILD[kind](data, T, ledger), data, T)
+
+
+def with_week(card, data, T):
+    """Hand this week's goals to the card (its Week tab); a card without them just has no Week tab."""
+    try:
+        wk = week_block(data, T)
+    except Exception as e:  # noqa: BLE001
+        log(f"week goals left out: {e!r}")
+        wk = None
+    if wk and isinstance(card, dict):
+        card["week"] = wk
+    return card
 
 
 def offline_card(kind, T, err):
@@ -964,7 +1113,7 @@ def sync_queue():
     """Clicks that could not be written right away (offline, Notion down, the card closed first) go to Notion from here:
     the catch-up agent runs it at login, after a wake-up and every 10 minutes, in shadow and live mode alike, so saving a
     click never waits for a Claude task or for the next card. Quiet when nothing is queued (no Keychain read, no network)."""
-    waiting = queued()
+    waiting = queued() + goal_claims_waiting()
     if not waiting:
         return 0
     token = read_token()

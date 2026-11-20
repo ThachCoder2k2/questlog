@@ -1,0 +1,497 @@
+/* ================= Pocket LCD: a pocket LCD game. Every icon and digit is printed on the glass as a ghost;
+   only what is true right now lights up. Ink on grey-green glass, a red printed faceplate, rubber keys, piezo beeps. ================= */
+$T body, $T body[class] {
+  --lcd: #AEB89C; --lcd-hi: #BAC4A8; --lcd-lo: #A1AC8F;
+  --ink: #16201A; --ink-2: rgba(22,32,26,.8); --ink-3: rgba(22,32,26,.56); --ghost: rgba(22,32,26,.1); --ghost-2: rgba(22,32,26,.2);
+  --face: #E0442B; --shell: #2A2C30; --silk: #FCE7CC; --bezel: #1F2225; --inv: #BAC4A8; --inv-ghost: rgba(186,196,168,.14);
+  --cond: "DIN Condensed", "Avenir Next Condensed", "Helvetica Neue", sans-serif;
+  --font: "DIN Alternate", "DIN Condensed", "Avenir Next", sans-serif;
+  --void: transparent; --void-deep: transparent; --constellation: var(--ghost); --cell: transparent; --cell-border: var(--ink-3);
+  --row-fill: transparent; --row-border: transparent; --row-border-done: transparent; --band: transparent; --band2: transparent; --streak: transparent;
+  --rim: var(--ink); --text-active: var(--ink); --text-selected: var(--ink); --halo: transparent; --text-body: var(--ink);
+  --ui-cyan: var(--ink); --cream: var(--ink); --cream-icon: var(--ink); --cream-grey: var(--ink-2);
+  --gold: var(--ink); --gold-soft: var(--ink); --gold-glow: transparent; --done-text: var(--ink-3);
+  --slot-fill: transparent; --slot-border: transparent; --slot-a: transparent; --slot-b: transparent; --slot-rim: transparent; --marker: transparent;
+  --giver: var(--ink); --mint: var(--ink); --stamina: var(--ink); --gloom: var(--ink-2); --gloom-border: var(--ink-3);
+  --heart: var(--ink); --lav: var(--ink); --stamp: var(--ink); --stamp-line: transparent; --tan: var(--ghost-2);
+  --num: var(--ink); --glow-k: 0; --edge: transparent; --orn: var(--ghost-2); --lo: 1;
+  font-family: var(--font); color: var(--ink);
+}
+$T * { font-style: normal !important; text-shadow: none !important; filter: none !important; }
+$T body * { box-shadow: none !important; }
+$T ::selection { background: var(--ink); color: var(--inv); }
+$T *::-webkit-scrollbar-thumb { background: var(--ink-3) !important; border-radius: 0 !important; }
+$T :focus-visible { outline: 3px solid var(--ink) !important; outline-offset: 2px; border-radius: 0 !important; }
+$T body.go .card, $T body.go .rule, $T body.go .htext, $T body.go .slot, $T body.go .prog, $T body.go .chip, $T body.go .q, $T body.go .sh,
+$T body.go .more, $T body.go .empty, $T body.go .xp, $T body.go .divider, $T body.go .desc, $T body.go .note, $T body.go .ft,
+$T body.go .wkb.in, $T body.go .lnb.in, $T body.go .wkb.in .q, $T body.go .lnb.in .q, $T .detail.in, $T .sidepane.in, $T body.full .stage,
+$T body.go .rcard, $T body.go .cur.on::after, $T body.go .cur.arrive::before { animation: none !important; }
+
+/* ---------- the device: charcoal shell, red faceplate, one LCD window ---------- */
+$T body.full { background: radial-gradient(1200px 800px at 50% 30%, #25272C, #111214); }
+$T body.full .stage { inset: 34px 40px; padding: 64px 50px 0; column-gap: 44px; border: 0; border-radius: 42px;
+  grid-template-columns: minmax(440px, 42%) minmax(0, 1fr); background: var(--face);
+  box-shadow: 0 0 0 16px var(--shell), 0 0 0 18px #3B3E44, 0 36px 70px rgba(0,0,0,.55), inset 0 2px 0 rgba(255,255,255,.18), inset 0 -3px 0 rgba(0,0,0,.12) !important; }
+$T body.full .stage::before { content: ""; position: absolute; z-index: 0; left: 30px; right: 30px; top: 58px; bottom: 118px; border-radius: 14px; pointer-events: none;
+  background: linear-gradient(165deg, var(--lcd-hi), var(--lcd) 55%, var(--lcd-lo));
+  box-shadow: 0 0 0 9px var(--bezel), 0 0 0 11px rgba(0,0,0,.22), inset 8px 10px 22px rgba(0,0,0,.24), inset -2px -2px 0 rgba(255,255,255,.12) !important; }
+$T body.full .stage::after { content: "Quest Log"; position: absolute; left: 38px; top: 20px; font: 700 26px/1 var(--cond); letter-spacing: .24em; text-transform: uppercase; color: var(--silk); }
+$T body.full .stage > .tabs, $T body.full .card, $T body.full .sidepane, $T body.full .stage > .ft { z-index: 1; }
+
+/* ---------- tabs: a segment band; Q / E are shoulder keys on the faceplate ---------- */
+$T .tabs { background: none; border: 0; border-bottom: 3px solid var(--ghost-2); font: 700 36px/1 var(--cond); letter-spacing: .1em; text-transform: uppercase; color: var(--ghost-2); cursor: default; }
+$T body.full .stage > .tabs { height: 60px; margin: 0; padding: 6px 8px 0; gap: 40px; font-size: 36px; justify-content: flex-start; border-radius: 0; background: none; }
+$T .tabs .tab { padding: 0; gap: 10px; }
+$T .tabs .tab.on { color: var(--ink); font-weight: 700; }
+$T .tabs .tab.on::after { display: none; }
+$T .tabs .tab:not(.on):hover { color: var(--ink-3); }
+$T .tabs .tab .badge { min-width: 22px; height: 22px; padding: 4px 5px 0; margin: -6px 0 0; border-radius: 0; background: var(--ink); color: var(--inv); font: 700 17px/1 var(--cond); letter-spacing: 0; }
+$T .tabs .tab .badge.dot { width: 11px; min-width: 11px; height: 11px; padding: 0; margin-top: -8px; background: var(--ink); }
+$T body.full .tabs > .key { position: absolute; top: -52px; width: auto; height: 40px; padding: 4px 18px 0; display: inline-flex; align-items: center; gap: 10px; border-radius: 20px;
+  background: var(--shell); color: var(--silk); font: 700 24px/1 var(--cond); letter-spacing: .06em; cursor: pointer;
+  box-shadow: 0 4px 0 #17181A, 0 7px 12px rgba(0,0,0,.3) !important; }
+$T body.full .tabs > .key:first-child { right: 150px; }
+$T body.full .tabs > .key:not(:first-child) { right: 30px; }
+$T body.full .tabs > .key:first-child::after { content: ""; margin-top: -4px; border: 8px solid transparent; border-right: 11px solid currentColor; border-left: 0; }
+$T body.full .tabs > .key:not(:first-child)::before { content: ""; margin-top: -4px; border: 8px solid transparent; border-left: 11px solid currentColor; border-right: 0; }
+$T body.full .tabs > .key:active { transform: translateY(3px); box-shadow: 0 1px 0 #17181A !important; }
+$T body.full .tabs .thb { top: -48px; right: 262px; width: 34px; height: 34px; margin: 0; border-radius: 50%; background: var(--shell); color: var(--silk);
+  box-shadow: 0 3px 0 #17181A, 0 6px 10px rgba(0,0,0,.3) !important; }
+$T .tabs .thb:hover { color: #FFFFFF; }
+$T .tband { display: flex; align-items: center; gap: 18px; margin-left: auto; padding-bottom: 6px; font: 700 34px/1 var(--cond); letter-spacing: .08em; color: var(--ink); }
+$T .tband .qpic { width: 30px; height: 30px; }
+$T .tband .qpic.g { color: var(--ghost-2); }
+$T .tband .tclear { padding: 4px 8px 0; margin-left: 6px; font-size: 26px; letter-spacing: .14em; text-transform: uppercase; color: var(--ghost); }
+$T body.lcd-clear .tband .tclear { background: var(--ink); color: var(--inv); animation: lcdblink3 .9s steps(1) both; }
+$T .tband .tdate { margin-left: 6px; }
+
+/* the power-on test: every ghost segment lights once */
+$T body.ltest .tabs .tab, $T body.ltest .tband .qpic, $T body.ltest .tband .tclear, $T body.ltest .tb-boss, $T body.ltest .tb-min, $T body.ltest .q::after { color: var(--ink) !important; border-left-color: var(--ink) !important; }
+$T body.ltest .seg use.gh { fill: var(--ink) !important; }
+$T body.ltest .tb-bar i { background: var(--ink) !important; }
+
+/* ---------- header: text only, hierarchy by size ---------- */
+$T .hd { background: none !important; padding: 14px 4px 10px; grid-template-columns: 40px 1fr auto; gap: 14px; cursor: default; }
+$T .hd::before, $T .hd::after, $T .hd .sweep, $T .hcrest { display: none; }
+$T body.full .hd { margin-top: 6px; border-radius: 0; }
+$T .slot { width: 40px; height: 40px; background: none; border: 0; }
+$T .slot::after { display: none; }
+$T .slot svg { width: 34px; height: 34px; color: var(--ink); }
+$T .htext { display: flex; flex-direction: column; }
+$T .title { font: 700 40px/1.02 var(--cond); color: var(--ink); padding-top: 4px; }
+$T .eyebrow { order: 2; margin-top: 4px; font: 700 19px/1.2 var(--cond); letter-spacing: .12em; text-transform: uppercase; color: var(--ink-2); }
+$T .subtitle { order: 3; margin-top: 4px; font: 700 17px/1.3 var(--font); color: var(--ink-2); }
+$T .stamp { align-self: center; transform: none; padding: 6px 10px 3px; background: var(--ink); color: var(--inv); font: 700 22px/1 var(--cond); letter-spacing: .14em; text-transform: uppercase; font-variant-caps: normal; }
+$T .stamp::after { display: none; }
+$T .rule, $T .prog .bar, $T .prog .bar.r { height: 3px; background: var(--ghost-2) !important; }
+$T .wheel::before, $T .wheel::after, $T .ring, $T .wheel .flare { display: none; }
+$T .wheel .cnt { font: 700 30px/1 var(--cond); color: var(--ink); }
+$T .chip { background: none !important; border: 0; border-top: 3px solid var(--ghost-2); border-radius: 0; }
+$T .chip .v { font: 700 26px/1.1 var(--cond); color: var(--ink); }
+$T .chip .l { font: 700 14px/1.2 var(--cond); letter-spacing: .1em; text-transform: uppercase; color: var(--ink-2); }
+$T .emo[data-emo]:not([data-emo=""]) { display: inline-block; width: .95em; height: .95em; margin: 0 .12em; vertical-align: -.12em; font-size: inherit; color: transparent; overflow: hidden;
+  background: var(--ink); -webkit-mask: var(--qp) center / contain no-repeat; mask: var(--qp) center / contain no-repeat; }
+
+/* ---------- lists: rows printed on the glass; the selected row is an inverse bar ---------- */
+$T .lists { padding: 6px 0 10px; }
+$T .cur { display: none; }
+$T .sh { margin: 16px 8px 6px 26px; gap: 10px; font: 700 21px/1 var(--cond); letter-spacing: .16em; text-transform: uppercase; color: var(--ink); }
+$T .sh svg { width: 20px; height: 20px; color: var(--ink); }
+$T .sh .ln { height: 3px; opacity: 1; background: var(--ghost-2) !important; }
+$T .sh .n { padding: 0; font: 700 21px/1 var(--cond); color: var(--ink-2); }
+$T .sh .n::before, $T .sh .n::after, $T .sh.has-track::before { display: none; }
+$T .q, $T body.k-weekly .q { grid-template-columns: 28px 1fr; gap: 0 12px; min-height: 48px; margin: 0 6px 3px 26px; padding: 5px 112px 5px 8px;
+  background: none !important; border: 0 !important; border-radius: 0; transition: none; }
+$T .q.has-tag { margin-top: 0; }
+$T .q::before { display: none !important; }
+$T .q::after { content: ""; position: absolute; left: -24px; top: 50%; margin-top: -9px; border: 9px solid transparent; border-left: 13px solid var(--ghost-2); border-right: 0; }
+$T .q.sel::after { border-left-color: var(--ink); }
+$T .q.sel, $T .wcb .q.sel, $T .slist .q.sel { background: var(--ink) !important; box-shadow: none !important; }
+$T .q.sel, $T .q.sel * { color: var(--inv) !important; }
+$T .q .t, $T body.full .q .t { padding-top: 4px; font: 700 27px/1.08 var(--cond); letter-spacing: .005em; color: var(--ink); }
+$T .q .tg { margin-top: 2px; gap: 8px; font: 700 16px/1.25 var(--font); color: var(--ink-2); }
+$T .q .tg .ln { height: 2px; background: var(--ghost-2); }
+$T .q .tg .warn { width: 16px; height: 16px; border-radius: 0; background: var(--ink); color: var(--inv); font: 700 13px/1 var(--cond); padding-top: 2px; }
+$T .q.sel .tg .warn { background: var(--inv); color: var(--ink) !important; }
+$T .q .tg .wgc, $T .q .tg .day, $T .q .tg .live { color: var(--ink-2); }
+$T .qart, $T .slist .q .qart, $T .slist .q.lslot .qart, $T .slist .q.lslot.s-today .qart, $T .slist .q.lslot.s-pick .qart { width: 28px; height: 28px; display: grid; place-items: center; overflow: visible; background: none !important; color: var(--ink); }
+$T .qart svg { display: none; }
+$T .q[data-pict] .qart::before { content: ""; width: 26px; height: 26px; background: currentColor; -webkit-mask: var(--qp) center / contain no-repeat; mask: var(--qp) center / contain no-repeat; }
+$T .slist .q.sq .qart svg { display: block; width: 24px; height: 24px; color: currentColor; }
+$T .slist .q.sq .qart::before { display: none; }
+$T .qtag { display: none; }
+$T .mk, $T body.k-weekly .mk { right: 0; width: 28px; background: none !important; border: 0 !important; }
+$T .mk svg { width: 18px; height: 18px; color: var(--ink); }
+$T .mk.s-todo svg { opacity: 0 !important; }
+$T .mk.s-track::after { border-radius: 0; border: 3px solid currentColor; animation: none; }
+$T .mk b { font: 700 18px/1 var(--cond); color: var(--ink); }
+$T .mk.g-ready svg, $T .mk.g-won svg, $T .mk.g-moved svg, $T .mk.pin svg, $T .mk.pin.pin-today svg, $T .mk.g-behind svg { color: var(--ink) !important; }
+$T .ck { right: 30px; width: 32px; background: none !important; border: 0; color: transparent; }
+$T .ck::before { content: ""; position: absolute; left: 5px; top: 50%; width: 22px; height: 22px; margin-top: -11px; border: 3px solid var(--ghost-2); }
+$T .ck svg { position: relative; width: 18px; height: 18px; }
+$T .ck:hover { color: var(--ink-3); }
+$T .ck.on, $T .q.done .ck { color: var(--ink); }
+$T .q.sel .ck::before { border-color: var(--inv-ghost); }
+$T .q.sel .ck { color: transparent !important; }
+$T .q.sel.done .ck, $T .q.sel .ck.on { color: var(--inv) !important; }
+$T .q.done:not(.sel) .t, $T .q.done .t, $T .q.moved .t, $T .q.gmoved .t, $T .q.won .t { color: var(--ink-3); }
+$T .q.done:not(.sel) .qart { color: var(--ink-3); }
+$T .q.flash .ck::after, $T .q.flash .mk::after { display: none; }
+$T body.lcd-clear .q.sel { animation: lcdinv .9s steps(1) both !important; }
+@keyframes lcdinv { 0%, 22%, 44% { background: var(--ink); } 11%, 33% { background: transparent; } }
+@keyframes lcdblink { 50% { opacity: .15; } }
+@keyframes lcdblink3 { 0%, 22%, 44% { opacity: 1; } 11%, 33% { opacity: 0; } }
+
+/* minutes: two seven-segment cells on every row (ghost 88 underneath) */
+$T .tnum { display: block; position: absolute; right: 70px; top: 50%; height: 28px; margin-top: -14px; pointer-events: none; }
+$T .tnum b { display: none; }
+$T .tnum .seg { display: block; width: auto; height: 28px; transform: skewX(-7deg); }
+$T .seg use.gh { fill: var(--ghost); }
+$T .seg use.l { fill: var(--ink); }
+$T .q.sel .seg use.gh { fill: var(--inv-ghost); }
+$T .q.sel .seg use.l { fill: var(--inv); }
+$T .q.done:not(.sel) .seg use.l { fill: var(--ink-3); }
+
+/* ---------- description box: a band of indicators, then text ---------- */
+$T .desc { margin: 14px 8px 12px 26px; padding: 14px 0 0; border: 0; border-top: 3px solid var(--ghost-2); border-radius: 0; background: none !important; }
+$T .desc::before { display: none; }
+$T .desc .dm { position: static; display: flex; flex-wrap: wrap; gap: 10px; margin-bottom: 8px; }
+$T .desc .dm > span { height: 26px; padding: 4px 8px 0; border: 2px solid var(--ink); border-radius: 0; background: none; font: 700 17px/1 var(--cond); letter-spacing: .08em; text-transform: uppercase; color: var(--ink); }
+$T .desc .st::before { display: none; }
+$T .desc .st.live, $T .desc .dm .st.go, $T .desc .dm .st.today, $T .desc .dm .st.boss { background: var(--ink); border-color: var(--ink); color: var(--inv); }
+$T .desc .st.done, $T .desc .st.delay { color: var(--ink); border-color: var(--ink); }
+$T .desc .dm .pip { width: 10px; height: 10px; border: 2px solid var(--ink); border-radius: 0; }
+$T .desc .dm .pip.on { background: var(--ink); }
+$T .desc .dt { padding-top: 3px; font: 700 28px/1.05 var(--cond); color: var(--ink); }
+$T .desc .lb { margin-top: 10px; font: 700 17px/1 var(--cond); letter-spacing: .14em; text-transform: uppercase; color: var(--ink); }
+$T .desc .lb i { display: none; }
+$T .desc .lb::after { height: 3px; background: var(--ghost-2); }
+$T .desc .tx { margin-top: 6px; font: 700 18px/1.3 var(--font); color: var(--ink); }
+$T .desc .sync { position: static; display: inline-flex; margin-top: 10px; height: auto; padding: 0; border: 0; background: none; font: 700 16px/1 var(--cond); letter-spacing: .08em; text-transform: uppercase; color: var(--ink-2); }
+$T .desc input.line, $T .wgoal input.line { height: 42px; margin-top: 10px; border: 3px solid var(--ink); border-radius: 0; background: var(--lcd-hi); color: var(--ink); font: 700 20px var(--font); caret-color: var(--ink); }
+$T .desc input.line::placeholder, $T .wgoal input.line::placeholder { color: var(--ink-3); }
+$T .desc code, $T .dtx code { font: 700 .88em/1.3 Menlo, monospace; color: var(--inv); background: var(--ink); border-radius: 0; }
+$T .note { font: 700 16px/1.3 var(--font); color: var(--ink-2); }
+$T .more:not(.slist):not(.wcb) { font: 700 16px/1 var(--cond); letter-spacing: .1em; text-transform: uppercase; color: var(--ink-2); }
+$T .more:not(.slist):not(.wcb)::after { height: 3px; background: var(--ghost-2); }
+$T .empty { border: 3px dashed var(--ghost-2); border-radius: 0; font: 700 18px/1.3 var(--font); color: var(--ink-2); }
+$T .divider i, $T .divider i::after { background: var(--ghost-2) !important; }
+$T .divider svg { color: var(--ink-3); }
+$T .xp .it { font: 700 16px/1.2 var(--cond); color: var(--ink); }
+$T .xp .it .tr { height: 8px; border-radius: 0; background: var(--ghost); }
+$T .xp .it .tr i { background: var(--ink); }
+
+/* ---------- Today detail: big segment minutes, then the title ---------- */
+$T body.full .card { margin-bottom: 22px; }
+$T body.full .sidepane { margin: 0 0 22px; }
+$T body.full .sidepane .detail { padding: 0 6px 18px 30px; background: none; border-left: 3px solid var(--ghost-2); }
+$T .detail .emblem { display: none; }
+$T .dtop, $T body.full .dtop { position: static; height: auto; margin: 0; padding: 14px 0 10px; background: none !important; border-bottom: 3px solid var(--ghost-2); border-radius: 0; }
+$T .dobj { font: 700 19px/1 var(--cond); letter-spacing: .1em; text-transform: uppercase; color: var(--ink-2); }
+$T .dobj .ring { color: var(--ink); }
+$T .dobj.on { color: var(--ink); }
+$T .dobj.on .ring::after { border-radius: 0; border-color: var(--ink); animation: none; }
+$T .dstat { height: 30px; padding: 4px 10px 0; border: 2px solid var(--ink); border-radius: 0; background: none; font: 700 18px/1 var(--cond); letter-spacing: .1em; text-transform: uppercase; color: var(--ink); }
+$T .dstat.done, $T .dstat.live { background: var(--ink); color: var(--inv); }
+$T .dstat:hover { color: var(--ink); background: var(--ghost); }
+$T .dmap, $T body.full .dmap { height: auto; margin: 16px 0 4px; overflow: visible; border-radius: 0; }
+$T .dmap > svg, $T .dmap::after { display: none; }
+$T .dmap .tbig svg { position: static; inset: auto; width: auto; }
+$T .tbig { display: block; }
+$T .tbig .tb-band, $T .tbig .tb-date, $T .tbig .tb-num > b, $T .tbig .tb-road2, $T .tbig .tb-mon { display: none; }
+$T .tb-road { display: flex; align-items: center; gap: 12px; font: 700 26px/1 var(--cond); letter-spacing: .14em; text-transform: uppercase; color: var(--ink); }
+$T .tb-road > span { padding-top: 4px; }
+$T .tb-road .qpic { width: 28px; height: 28px; }
+$T .tb-boss { margin-left: auto; display: inline-flex; align-items: center; gap: 8px; padding-top: 4px; color: var(--ghost-2); }
+$T .tb-boss .qpic { width: 24px; height: 24px; margin-top: -4px; }
+$T .tb-boss.on { color: var(--ink); }
+$T .tb-num { display: flex; align-items: flex-end; gap: 18px; margin-top: 14px; }
+$T .tb-num .seg { display: block; width: auto; height: 136px; transform: skewX(-7deg); transform-origin: 0 100%; }
+$T .tb-side { display: flex; }
+$T .tb-min { padding-bottom: 2px; font: 700 52px/1 var(--cond); letter-spacing: .1em; text-transform: uppercase; color: var(--ink); }
+$T .tbig.nomin .tb-min { color: var(--ghost-2); }
+$T .tb-bar { display: flex; gap: 6px; margin-top: 16px; }
+$T .tb-bar i { flex: 1; max-width: 26px; height: 14px; background: var(--ghost); transform: skewX(-7deg); }
+$T .tb-bar i.on { background: var(--ink); }
+$T .dhead .tslot { display: none; }
+$T .dtitle, $T body.full .dtitle { margin-top: 14px; font: 700 52px/1 var(--cond); color: var(--ink); text-wrap: balance; }
+$T .dacts { gap: 10px; margin: 16px 0 4px; }
+$T .dact, $T body.full .dact { height: 38px; padding: 4px 14px 0; gap: 8px; border: 3px solid var(--ink); border-radius: 0; background: none; font: 700 20px/1 var(--cond); letter-spacing: .1em; text-transform: uppercase; color: var(--ink); }
+$T .dact svg { width: 16px; height: 16px; margin-top: -4px; }
+$T .dact.done { background: var(--ink); color: var(--inv); }
+$T .dact:hover { background: var(--ghost); color: var(--ink); }
+$T .dact.done:hover { background: var(--ink); color: var(--inv); }
+$T .dact.move, $T .dact.undo, $T .dact.track.on { color: var(--ink); border-color: var(--ink); }
+$T .giver { margin: 16px 0 4px; gap: 10px; font: 700 19px/1 var(--cond); letter-spacing: .08em; text-transform: uppercase; color: var(--ink-2); }
+$T .giver > span { padding-top: 3px; }
+$T .giver .bang { width: 18px; height: 18px; padding-top: 3px; border-radius: 0; background: var(--ink); color: var(--inv); font: 700 14px/1 var(--cond); }
+$T .giver .gl { height: 3px; background: var(--ghost-2); }
+$T .giver .loc { color: var(--ink); }
+$T .dmeta { font: 700 17px/1 var(--cond); letter-spacing: .06em; text-transform: uppercase; color: var(--ink-2); }
+$T .dmeta .pip { width: 10px; height: 10px; border-radius: 0; background: none; border: 2px solid var(--ink); }
+$T .dmeta .pip.on { background: var(--ink); }
+$T .dsec { margin-top: 22px; }
+$T .dsh { font: 700 19px/1 var(--cond); letter-spacing: .16em; text-transform: uppercase; color: var(--ink); }
+$T .dsh svg { width: 18px; height: 18px; color: var(--ink); }
+$T .dsh .ln { height: 3px; background: var(--ghost-2); }
+$T .dtx, $T body.full .dtx { margin-top: 8px; font: 700 21px/1.32 var(--font); color: var(--ink); }
+$T .dtx.latest { color: var(--ink); }
+$T .dtx.muted { color: var(--ink-2); }
+$T .wgoal { margin-top: 8px; padding: 0; border: 0; background: none; }
+$T .wgoal .wgt { font: 700 30px/1.1 var(--cond); color: var(--ink); }
+$T .wgoal .wgm { margin-top: 6px; font: 700 21px/1.3 var(--font); color: var(--ink); }
+$T .steps li, $T body.full .steps li { font: 700 18px/1.3 var(--font); color: var(--ink); }
+$T .steps li::before { width: 3px; background: var(--ghost-2); }
+$T .steps .dot { border-radius: 0; border: 3px solid var(--ink); background: var(--lcd); }
+$T .steps li.done { color: var(--ink-3); }
+$T .steps li.done .dot { border-color: var(--ink-3); color: var(--ink-3); }
+$T .steps li.this .dot { background: var(--ink); border-color: var(--ink); }
+$T .steps .sd { font: 700 16px/1 var(--cond); letter-spacing: .06em; color: var(--ink-2); }
+$T .dsync { font: 700 16px/1 var(--cond); letter-spacing: .08em; text-transform: uppercase; color: var(--ink-2); }
+
+/* ---------- Study: the road as a dotted segment track ---------- */
+$T .ssub { margin: 18px 8px 6px 26px; gap: 22px; }
+$T .ssub span { padding: 0 0 6px; font: 700 22px/1 var(--cond); letter-spacing: .12em; text-transform: uppercase; color: var(--ghost-2); }
+$T .ssub span:hover { color: var(--ink-3); }
+$T .ssub span.on { color: var(--ink); }
+$T .ssub span.on::after { height: 3px; border-radius: 0; background: var(--ink); }
+$T .ssub .key { height: 24px; padding: 4px 8px 0; border-radius: 0; background: var(--ink); color: var(--inv); font: 700 16px/1 var(--cond); letter-spacing: .08em; text-transform: uppercase; }
+$T .slist .q { margin: 0 6px 3px 26px; }
+$T .slist .q.sq { padding-right: 20px; }
+$T .slist .q.add, $T .slist .q.lslot.s-pick, $T .slist .q.lslot.s-none { border: 0 !important; }
+$T .slist .q.add .t, $T .slist .q.lslot.s-none .t, $T .slist .q.light:not(.sel) .t { color: var(--ink-2); }
+$T .slist .q .t .pre { margin-right: 10px; padding: 3px 6px 0; border: 2px solid currentColor; font: 700 16px/1 var(--cond); letter-spacing: .1em; text-transform: uppercase; color: inherit; }
+$T .spips i { border: 2px solid var(--ink-3); transform: none; }
+$T .spips i.on { background: var(--ink); border-color: var(--ink); }
+$T .spips i.cur { background: none; border-color: var(--ink); }
+$T .q.sel .spips i { border-color: var(--inv); }
+$T .q.sel .spips i.on { background: var(--inv); }
+$T .lnb.away .slist .q.sel { background: none !important; outline: 3px solid var(--ink); outline-offset: -3px; }
+$T .lnb.away .slist .q.sel, $T .lnb.away .slist .q.sel * { color: var(--ink) !important; }
+$T .lnb.away .slist .q.sel .seg use.l { fill: var(--ink); }
+$T .lnb.away .slist .q.sel .seg use.gh { fill: var(--ghost); }
+$T .lnb.deck .slist .q:not(.sel), $T .lnb.deck .ssub, $T .lnb.deck .slist .sh { opacity: .35; }
+$T .smap { background: none !important; }
+$T body.full .smap { border-left: 3px solid var(--ghost-2); }
+$T .shead { left: 30px; right: 10px; top: 14px; gap: 14px; }
+$T .semb { width: 40px; height: 40px; background: none !important; color: var(--ink); }
+$T .semb svg { width: 34px; height: 34px; color: var(--ink); }
+$T .stitle { font: 700 36px/1.05 var(--cond); color: var(--ink); }
+$T .sgoal { font: 700 17px/1.3 var(--font); color: var(--ink-2); }
+$T .sarea svg.road path:nth-child(1) { stroke: var(--ghost-2); stroke-width: 5; }
+$T .sarea svg.road path:nth-child(2) { stroke: var(--ink-3); stroke-width: 4; stroke-dasharray: 12 7; }
+$T .sarea svg.road path:nth-child(3) { opacity: 0; }
+$T .sarea svg.road path:nth-child(4) { stroke: var(--ink); stroke-width: 5; }
+$T .mnode .em { border: 3px solid var(--ink); background: var(--lcd) !important; }
+$T .mnode .em svg { color: var(--ink); }
+$T .mnode.done .em { background: var(--ink) !important; border-color: var(--ink); }
+$T .mnode.done .em svg { color: var(--inv); }
+$T .mnode.here .em, $T .mnode.goal:not(.done) .em { border-color: var(--ink); }
+$T .mnode.goal:not(.done) .em svg, $T .mnode.here .em svg { color: var(--ink); }
+$T .mlab { font: 700 21px/1.1 var(--cond); color: var(--ink); }
+$T .mlab.ahead { color: var(--ink-2); }
+$T .mlab.done { color: var(--ink); }
+$T .mlab.goal { font-size: 23px; color: var(--ink); }
+$T .sstart { font: 700 16px/1 var(--cond); letter-spacing: .1em; text-transform: uppercase; color: var(--ink-2); }
+$T .sdot { border: 3px solid var(--ink-3); background: var(--lcd) !important; }
+$T .sdot.ahead { border: 2px solid var(--ink-3); }
+$T .sdot.done { background: var(--ink) !important; border-color: var(--ink); }
+$T .sdot.next { border-color: var(--ink); }
+$T .sdot.boss { border: 3px solid var(--ink); background: var(--lcd) !important; }
+$T .sdot.boss svg { color: var(--ink); }
+$T .sdot.boss.ahead { border-color: var(--ink-3); }
+$T .sdot.boss.done { background: var(--ink) !important; }
+$T .sdot.boss.done svg { color: var(--inv); }
+$T .shere::before { border-left-color: var(--ink); }
+$T .spin svg path { fill: var(--ink); stroke: var(--lcd); }
+$T .spin svg circle { fill: var(--lcd); }
+$T .spin.today svg path { fill: var(--ink); }
+$T .spin b, $T .spin.today b { height: 22px; padding: 4px 7px 0; border-radius: 0; background: var(--ink); color: var(--inv); font: 700 16px/1 var(--cond); letter-spacing: .08em; text-transform: uppercase; }
+$T .scur::after { border: 3px solid var(--ink); border-radius: 0; }
+$T body.go .scur::after { animation: lcdblink 1.2s steps(1) infinite; }
+$T .sarea { bottom: 212px; }
+$T .scap { left: 30px; right: 10px; }
+$T .mstamp { padding: 14px 22px 9px; border: 0; border-radius: 0; background: var(--ink); color: var(--inv); font: 700 36px/1 var(--cond); letter-spacing: .16em; text-transform: uppercase; font-variant-caps: normal;
+  transform: translate(-50%, -50%); animation: lcdblink3 .9s steps(1) both; }
+$T .mstamp small { margin-top: 6px; font: 700 18px/1.2 var(--font); letter-spacing: 0; text-transform: none; color: var(--inv); }
+
+/* Recall: the card is a framed region of the glass */
+$T .rcard { padding: 20px 24px 22px; border: 3px solid var(--ink) !important; border-radius: 0; background: none !important; }
+$T .rroad { font: 700 19px/1 var(--cond); letter-spacing: .14em; text-transform: uppercase; color: var(--ink) !important; }
+$T .rroad svg { color: var(--ink); }
+$T .rq { margin-top: 14px; font: 700 30px/1.25 var(--font); color: var(--ink); }
+$T .ra { border-top: 3px solid var(--ghost-2); }
+$T .ra .lbl { font: 700 17px/1 var(--cond); letter-spacing: .14em; text-transform: uppercase; color: var(--ink-2); }
+$T .ra .rat { font: 700 22px/1.35 var(--font); color: var(--ink); }
+$T .rpips i { width: 12px; height: 12px; border-radius: 0; border: 2px solid var(--ink-3); }
+$T .rpips i.on { background: var(--ink); border-color: var(--ink); }
+$T .rpips i.now { border-color: var(--ink); }
+$T .rg { height: 46px; padding: 4px 12px 0; border: 3px solid var(--ink); border-radius: 0; background: none; color: var(--ink); font: 700 22px/1 var(--cond); letter-spacing: .08em; text-transform: uppercase; }
+$T .rg b { width: 24px; height: 24px; padding-top: 3px; margin-top: -3px; border-radius: 0; background: var(--ink); color: var(--inv); font: 700 18px/1 var(--cond); }
+$T .rg.sel { background: var(--ink); color: var(--inv); }
+$T .rg.sel b { background: var(--inv); color: var(--ink); }
+$T .rg.park span { color: inherit; }
+
+/* ---------- Week: columns divided by printed rules ---------- */
+$T body.full.tab-week .card { margin-bottom: 22px; }
+$T body.full .wcols { gap: 0; }
+$T .wcol + .wcol { border-left: 3px solid var(--ghost-2); }
+$T .wcol .sh { margin: 14px 8px 8px 30px; }
+$T .wcol .sh svg { color: var(--ink); }
+$T .wcb { padding: 4px 6px 10px 30px; }
+$T .wcb .q { margin: 0 0 4px; padding-right: 40px; }
+$T .wcb .q .t { font-size: 24px; }
+$T .wcb .q.lesson-plate { border: 0 !important; }
+$T .wdesc { margin: 10px 8px 0 26px; }
+
+/* ---------- keys: rubber buttons on the faceplate ---------- */
+$T body.full .stage > .ft { min-height: 104px; margin: 0; padding: 20px 4px 26px 140px; gap: 24px; align-items: center; justify-content: flex-end; background: none; border-radius: 0; }
+$T body.full .stage > .ft::before { display: block; content: ""; position: absolute; left: 6px; top: 50%; bottom: auto; right: auto; width: 76px; height: 76px; margin-top: -38px; opacity: 1;
+  -webkit-mask: none; mask: none; background: linear-gradient(var(--shell), var(--shell)) center / 76px 26px no-repeat, linear-gradient(var(--shell), var(--shell)) center / 26px 76px no-repeat; }
+$T body.full .stage > .ft::after { content: "Move"; position: absolute; left: 96px; top: 50%; margin-top: -9px; font: 700 22px/1 var(--cond); letter-spacing: .14em; text-transform: uppercase; color: var(--silk); }
+$T .kp, $T body.full .kp { flex-direction: row-reverse; gap: 10px; font: 700 22px/1 var(--cond); letter-spacing: .12em; text-transform: uppercase; color: var(--silk); opacity: 1; }
+$T .kp > span { padding-top: 4px; }
+$T .kp.pri { color: var(--silk); }
+$T .kp i, $T .kp i.pill { width: 50px; min-width: 50px; height: 50px; padding: 4px 0 0; border-radius: 50%; background: var(--shell); color: var(--silk); font: 700 22px/1 var(--cond); letter-spacing: 0;
+  box-shadow: 0 4px 0 #17181A, 0 7px 10px rgba(0,0,0,.3) !important; transition: transform .05s, box-shadow .05s; }
+$T .kp i.pill { font-size: 19px; }
+$T .kp i svg { width: 20px; height: 20px; margin-top: -4px; }
+$T .kp:hover { text-shadow: none; }
+$T .kp:hover i { background: #35383E; }
+$T .kp:active i, $T .kp.hit i { transform: translateY(3px); box-shadow: 0 1px 0 #17181A, 0 2px 4px rgba(0,0,0,.3) !important; }
+$T .ft:has(#kDone:not([hidden])) #kDone i, $T .ft:not(:has(#kDone:not([hidden]))) .kp.pri i { background: var(--silk); color: var(--shell); }
+$T .kp[disabled] { opacity: .45; }
+$T .toast { padding: 10px 16px 7px; border: 0; border-radius: 0; background: var(--ink); color: var(--inv); font: 700 22px/1 var(--cond); letter-spacing: .08em; text-transform: uppercase; }
+$T body.full .toast { bottom: 26px; }
+
+/* ---------- menus and the theme list: LCD panels ---------- */
+$T .menu { padding: 8px; border: 3px solid var(--ink); border-radius: 0; background: var(--lcd-hi) !important; box-shadow: 0 12px 26px rgba(0,0,0,.3) !important; }
+$T .mi { height: 38px; padding-top: 3px; border: 0; border-radius: 0; font: 700 21px/1 var(--cond); letter-spacing: .06em; text-transform: uppercase; color: var(--ink); }
+$T .mi .g { color: var(--ink) !important; }
+$T .mi.on { background: var(--ink) !important; color: var(--inv); }
+$T .mi.on .g { color: var(--inv) !important; }
+$T .mi.on::before { border-left-color: var(--ink); }
+$T .mi .now { font: 700 15px/1 var(--cond); color: inherit; opacity: .75; }
+$T .mi.warn .lbl, $T .mi.warn .g { color: inherit !important; }
+$T .msep { height: 3px; background: var(--ghost-2); }
+$T .thm { background: rgba(10,11,12,.5); }
+$T .thm .tp { width: 360px; padding: 18px 16px 14px; border: 0; border-radius: 12px; background: linear-gradient(165deg, var(--lcd-hi), var(--lcd)) !important;
+  box-shadow: 0 0 0 9px var(--bezel), 0 0 0 26px var(--face), 0 0 0 40px var(--shell), 0 30px 60px rgba(0,0,0,.5) !important; }
+$T .thm .tt { margin: 0 6px 10px; font: 700 30px/1 var(--cond); letter-spacing: .14em; text-transform: uppercase; color: var(--ink); }
+$T .thm .tr { height: 44px; padding-top: 3px; border: 0; border-radius: 0; background: none; color: var(--ink); font: 700 24px/1 var(--cond); letter-spacing: .06em; text-transform: uppercase; }
+$T .thm .tr.sel { background: var(--ink); color: var(--inv); }
+$T .thm .tr:hover:not(.sel) { box-shadow: inset 0 0 0 2px var(--ink); }
+$T .thm .tr.sel::before { border-left-color: var(--ink); }
+$T .thm .sw i { border-radius: 0; box-shadow: inset 0 0 0 2px rgba(22,32,26,.4) !important; }
+$T .thm .th { font: 700 17px/1 var(--cond); letter-spacing: .1em; text-transform: uppercase; color: var(--ink-2); }
+
+/* ---------- the corner card: a small handheld ---------- */
+$T body:not(.full) .card, $T body:not(.full) .sidepane { border: 12px solid var(--face) !important; border-radius: 22px;
+  background: linear-gradient(165deg, var(--lcd-hi), var(--lcd) 55%, var(--lcd-lo)) !important;
+  box-shadow: 0 0 0 9px var(--shell), inset 0 0 0 4px var(--bezel), 0 18px 40px rgba(0,0,0,.45) !important; }
+$T body:not(.full) .card::after, $T body:not(.full) .stone2 { display: none; }
+$T body:not(.full) .tabs { height: 46px; padding: 4px 14px 0; gap: 16px; justify-content: flex-start; font-size: 26px; }
+$T body:not(.full) .tabs > .key { width: auto; height: 24px; padding: 4px 7px 0; border-radius: 0; background: var(--ink); color: var(--inv); font: 700 15px/1 var(--cond); }
+$T body:not(.full) .tabs .thb { color: var(--ink); }
+$T body:not(.full) .tband { display: none; }
+$T body:not(.full) .q .t { font-size: 23px; }
+$T body:not(.full) .title { font-size: 32px; }
+$T body:not(.full) .ft { margin: 10px 0 0; padding: 12px 12px 12px; gap: 12px; flex-wrap: wrap; row-gap: 10px; background: var(--face) !important; }
+$T body:not(.full) .ft::before { display: none; }
+$T body:not(.full) .kp { font-size: 15px; gap: 6px; }
+$T body:not(.full) .kp i, $T body:not(.full) .kp i.pill { width: 34px; min-width: 34px; height: 34px; font-size: 16px; }
+$T body:not(.full) .sidepane .detail { padding: 0 18px 14px; background: none; }
+$T body:not(.full) .dtitle { font-size: 36px; }
+$T body:not(.full) .tb-num .seg { height: 92px; }
+$T body:not(.full) .tb-min { font-size: 36px; }
+
+/* review fixes: chips follow the title (no eyebrow rows), the minutes and the date are said once */
+$T .desc { display: flex; flex-direction: column; }
+$T .desc > .body { display: contents; }
+$T .desc .dt { order: 1; }
+$T .desc .dm { order: 2; margin: 8px 0 2px; }
+$T .desc .lb { order: 3; }
+$T .desc .tx, $T .desc input.line { order: 4; }
+$T .desc .sync { order: 5; }
+$T .detail:has(.tbig[data-pict="recall"]) .dsec:has(.wgoal) { display: none; }
+$T body:not(.tab-week):not(.tab-learn) .eyebrow { display: none; }
+$T .giver .loc[data-today="1"] { display: none; }
+$T .sarea.rdeck { align-content: start; padding-top: 18px; }
+
+/* review fixes, Pocket LCD: hierarchy by size and inverse video only; nothing is outlined */
+$T .tb-road { display: none; }
+$T .tb-side { flex-direction: column; gap: 6px; padding-bottom: 4px; }
+$T .tbig .tb-road2 { display: block; max-width: 260px; font: 700 24px/1.05 var(--cond); letter-spacing: .12em; text-transform: uppercase; color: var(--ink); }
+$T .tbig.nomin .tb-road2 { display: none; }
+$T .tb-side .tb-boss { margin: 0; padding: 0; font: 700 22px/1 var(--cond); letter-spacing: .14em; text-transform: uppercase; }
+$T .tb-side .tb-boss .qpic { width: 20px; height: 20px; margin: -3px 6px 0 0; }
+$T body.full .sidepane .detail { display: flex; flex-direction: column; }
+$T .detail > * { flex: none; }
+$T .dtop, $T body.full .dtop { order: 1; margin-top: 22px; padding: 12px 0 0; border-bottom: 0; border-top: 3px solid var(--ghost-2); }
+$T .dstat { border: 0; padding: 4px 0 0; background: none; }
+$T .dstat.done, $T .dstat.live { padding: 4px 10px 0; background: var(--ink); color: var(--inv); }
+$T .dact, $T body.full .dact { border: 0; padding: 4px 12px 0; background: none; }
+$T .dact.done { background: var(--ink); color: var(--inv); }
+$T .dact:hover { background: var(--ghost); }
+$T .rcard { border: 0 !important; padding: 0 4px; }
+$T .rq { font-size: 28px; }
+$T .rpips i { width: 14px; height: 10px; border: 0; background: var(--ghost-2); transform: skewX(-7deg); }
+$T .rpips i.on { background: var(--ink); }
+$T .rpips i.now { background: var(--ink-3); }
+$T .rg { border: 0; padding: 4px 12px 0; background: none; }
+$T .rg.sel { background: var(--ink); color: var(--inv); }
+$T .slist .q .t .pre { margin-right: 10px; padding: 0; border: 0; font: 700 17px/1 var(--cond); letter-spacing: .12em; text-transform: uppercase; color: inherit; opacity: .8; }
+$T .desc .dm > span { border: 0; padding: 4px 0 0; height: auto; background: none; }
+$T .desc .st.live, $T .desc .dm .st.go, $T .desc .dm .st.today, $T .desc .dm .st.boss { padding: 4px 8px 0; background: var(--ink); color: var(--inv); }
+$T .desc .dm { gap: 14px; }
+$T .ssub .key { padding: 0; background: none; color: var(--ghost-2); font: 700 18px/1 var(--cond); letter-spacing: .12em; }
+$T .ck::before { left: 7px; width: 18px; height: 18px; margin-top: -9px; border: 0; background: var(--ghost-2); }
+$T .ck svg { display: none; }
+$T .ck:hover::before { background: var(--ink-3); }
+$T .ck.on::before, $T .q.done .ck::before { background: var(--ink); }
+$T .q.sel .ck::before { background: var(--inv-ghost); }
+$T .q.sel.done .ck::before, $T .q.sel .ck.on::before { background: var(--inv); }
+$T .q, $T body.k-weekly .q { min-height: 44px; padding-top: 4px; padding-bottom: 4px; }
+$T .q > div:not([class]) { display: flex; align-items: center; gap: 12px; min-width: 0; }
+$T .q .t, $T body.full .q .t { display: block; flex: 1 1 auto; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; -webkit-line-clamp: unset; }
+$T .q .tg { flex: 0 1 auto; max-width: 44%; margin-top: 0; padding-top: 2px; }
+$T .q .tg .ln { display: none; }
+$T .q .tg span:has(> .emo[data-emo="lock"]) { font-size: 0; }
+$T .q .tg .emo[data-emo="lock"] { width: 18px; height: 18px; margin: 0; }
+$T .wcb .q { min-height: 0; padding-top: 4px; padding-bottom: 4px; }
+$T .wcb .q > div:not([class]) { display: block; }
+$T .wcb .q .t, $T body.full .wcb .q .t { display: -webkit-box; white-space: normal; -webkit-line-clamp: 2; font-size: 22px; }
+$T .sarea { top: 100px; }
+$T .tband .tdate { display: inline-flex; align-items: flex-end; gap: 8px; }
+$T .tband .tdate .seg { height: 30px; width: auto; transform: skewX(-7deg); }
+$T .tband .tdate .tsl { width: 4px; height: 26px; margin: 0 2px 2px; background: var(--ink); transform: skewX(-20deg); }
+$T body.tab-learn .sidepane .detail, $T body.full #body .desc, $T body.full #body .note { display: none !important; }
+$T .q, $T body.k-weekly .q { padding-right: 124px; }
+$T .q .tg .emo[data-emo="lock"] { width: 20px; height: 20px; margin: 0 4px 0 0; }
+$T .q .tg .wgc span { display: none; }
+$T .wcb .q { padding-right: 40px; }
+$T .desc, $T body.full .smap .desc, $T body.full .lnb .desc, $T body.full .wkb .desc.wdesc { display: flex !important; }
+
+/* verdict 1 fixes, Pocket LCD */
+$T .tband .tdate { display: inline; }
+/* the remembered selection (focus on the map or the deck) is a ghost inverse bar, never an outline */
+$T .lnb.away .slist .q.sel { outline: 0; background: var(--ghost-2) !important; }
+/* open steps are faint ghosts; done steps are lit */
+$T .ck::before { background: var(--ghost); }
+$T .ck:hover::before { background: var(--ghost-2); }
+/* one-line rows: the title takes the width; the meta keeps only whole pictograms */
+$T .q .tg { flex: 0 0 auto; max-width: none; gap: 8px; }
+$T .q .tg span:not(.warn) { font-size: 0; overflow: visible; }
+$T .q .tg .emo[data-emo]:not([data-emo=""]) { flex: none; width: 20px; height: 20px; margin: 0; }
+$T .q .tg .wgc svg { width: 16px; height: 16px; }
+$T .q .tg .warn { flex: none; }
+/* the small card: titles may take two lines; one row of smaller keys */
+$T body:not(.full) .q .t { display: -webkit-box; white-space: normal; -webkit-line-clamp: 2; font-size: 22px; }
+$T body:not(.full) .lists { max-height: 420px; }
+$T body:not(.full) .ft { flex-wrap: nowrap; justify-content: space-between; gap: 6px; padding: 12px 10px; }
+$T body:not(.full) .kp { font-size: 13px; letter-spacing: .08em; gap: 5px; }
+$T body:not(.full) .kp i, $T body:not(.full) .kp i.pill { width: 28px; min-width: 28px; height: 28px; padding-top: 3px; font-size: 14px; }
+$T body:not(.full) .kp i svg { width: 14px; height: 14px; margin-top: -3px; }
+/* documenter's last two boxes: the empty state and the status menu carry no frame */
+$T .empty { border: 0; padding: 10px 0; background: none; color: var(--ink-2); }
+$T .menu { border: 0; background: var(--lcd-hi) !important; box-shadow: 0 0 0 3px var(--ghost), 0 14px 30px rgba(0,0,0,.3) !important; }
