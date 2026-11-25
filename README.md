@@ -61,6 +61,37 @@ optional weekly planner that nothing else depends on.
 - **Offline is fine.** A click that can't reach Notion waits in a local queue and goes out when the network is back.
 - **Week tab.** This week's goals from Notion, one column per area of your life. When a goal's quests are all done,
   you claim it by writing one line about what you got out of it.
+- **Study tab.** It shows only when `learn.json` exists next to `report.py`. The app reads it each time a card opens.
+One thread at a time: `active` lists the roads that run (the rest are parked behind one line in Roads), `days` the weekdays
+that have a lesson. Plan shows Today (Recall and today's lesson), Tomorrow, and Later: the next lessons if you keep going.
+Nothing pinned? The first card of the day adds today's lesson by itself (the next one on the road that belongs to today). A lesson
+you pin (P) is kept until it is today's, even over a skipped day. Each road says where you are: "Lesson 3 of 25 · ~20 h left".
+
+```json
+{
+  "active": ["road1"], "days": ["Mon", "Tue", "Wed", "Thu", "Fri"],
+  "tracks": [{
+    "id": "road1", "name": "My road", "short": "Road", "color": "#9BE38B", "goal": "…", "project": "…", "end_goal": "…",
+    "milestones": [{ "name": "First steps", "reached_when": "something you can run",
+      "sessions": [{ "title": "…", "resource": "…", "url": "…", "minutes": 50, "min": "the first step", "done": "what is true when it is done", "recall": "a question" }] }]
+  }],
+  "max_pins": 3, "recall_cap": 20, "recall_retention": 0.9, "recall_leech": 4, "recall_valve": [15, 0.85]
+}
+```
+
+One project per road keeps it easy to follow; roads that share a topic are separate roads. A milestone's lessons may be written inline
+(as above) or as numbers into the track's `sessions` list. Every milestone ends in a 30-minute Boss the card adds itself.
+`rhythm` (`{"Mon": ["ai"], …}`) still picks the road for a weekday when more than one runs; without it, the running roads take
+turns. Recall shows at most `recall_cap` cards a day and aims for `recall_retention`; if the last 30 days averaged more than 15 a
+day it aims for 0.85 instead (`recall_valve`). A card forgotten `recall_leech` times asks you to rewrite it or park it.
+
+`study.json` is written by the card after every change: where you are on each road, tomorrow's pins, today's lessons,
+Recall cards with their next date, and the line you wrote after each lesson. Delete it to start over. Today's lessons
+and Recall also sit on top of the Today list; marking them done never writes to Notion. The 22:00 card opens on Study
+until a lesson is pinned for tomorrow.
+
+**Week tab.** This week's goals from Notion, one column per area of your life. When a goal's quests are all done,
+  you claim it by writing one line about what you got out of it.
 - **Study tab.** Learning roads made of short lessons, plus spaced-repetition recall cards. It lives in local files
   and never touches Notion.
 - **Six themes**, each with its own sounds, all synthesized in Python.

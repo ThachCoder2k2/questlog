@@ -20,6 +20,7 @@
     const [x, y] = centre(e);
     if (!hit(e)) { check("a click target can be reached: " + ((e.id || e.className || e.tagName) + "").toString().slice(0, 30), false, "centre " + Math.round(x) + "," + Math.round(y) + " in " + innerWidth + "x" + innerHeight + ", covered or off screen"); return 0; }
     const s0 = window.__swallowed || 0; window.webkit.messageHandlers.ql.postMessage({ action: "__click", x, y }); await sleep(180); return (window.__swallowed || 0) - s0; };   // returns how many of its clicks the window-drag band took
+  const ensureMode = async () => { for (let i = 0; i < 3 && document.body.classList.contains("full") !== (P.startMode === "full"); i++) { K("m"); await sleep(800); } };   // a step that failed must not leave the card in the other mode for the steps after it
   const check = (name, ok, info) => P.checks.push({ name, ok: !!ok, info: info === undefined ? "" : info });
   // frame gaps: the longest time between two animation frames while a step runs (a stall the eye sees)
   let last = performance.now(), gap = 0, tracking = false;
@@ -178,7 +179,7 @@
       const sub = () => ((document.querySelector(".ssub .on") || {}).textContent || "").trim();
       await step("Tab (Roads)", () => K("Tab"), 400);
       check("Tab moves to Roads", /roads/i.test(sub()), sub());
-      await step("↓ in Roads", () => K("ArrowDown"), 300);
+      await step("↑ in Roads (the running road)", () => K("ArrowUp"), 300);   // ↓ would land on the fold of parked roads: Enter there folds, it does not open a map
       await step("Enter (open the road's map)", () => K("Enter"), 500);
       await step("→ on the map", () => K("ArrowRight"), 300);
       await step("Esc (leave the map)", () => K("Escape"), 500);
@@ -224,6 +225,7 @@
       await step("↓ next goal", () => K("ArrowDown"), 300);
       const t1 = tabs[0]; if (t1) await step("back to Today", () => click(t1), 450);
     }
+    await ensureMode();
     /* 8. real clicks on the controls of Today: every one must reach the page and do its job */
     {
       const T0 = [...document.querySelectorAll(".tabs .tab")].filter(vis)[0]; if (T0) { await real(T0); await sleep(450); }
@@ -255,7 +257,7 @@
         check("a real click on the footer Status key opens the status menu", mn && vis(mn));
         if (mn && vis(mn)) {
           const items = [...mn.children].filter(vis), pick = items.find(i => /track/i.test(i.textContent || "")) || items[1] || items[0], h = hostLog().length;
-          await real(pick); await sleep(500);
+          await real(pick); await sleep(800);
           check("a real click on a status-menu item applies it and closes the menu", !vis(mn) && sendsStatus(h), (pick.textContent || "").trim().slice(0, 20));
         }
       }
@@ -263,6 +265,7 @@
       if (detBtn && document.body.classList.contains("full")) { const h = hostLog().length; await real(detBtn); await sleep(500); check("a real click on the detail pane's button works", sendsStatus(h), (detBtn.textContent || "").trim().slice(0, 20)); const again = [...document.querySelectorAll(".dact")].filter(vis).find(hit); if (again) { await real(again); await sleep(500); } }   // the pane is drawn again after the click: take the new button
     }
 
+    await ensureMode();
     /* 9. real clicks in Study and Week */
     {
       const tbs = [...document.querySelectorAll(".tabs .tab")].filter(vis);
@@ -310,6 +313,41 @@
         else check("a goal other than the selected one is on screen to click", false, goals.map(g => { const [x, y] = centre(g); const u = document.elementFromPoint(x, y); return rect(g).join(",") + " under:" + (u ? (u.className.toString() || u.tagName).slice(0, 24) : "none") + " sel:" + g.classList.contains("sel"); }).join(" | ") + " viewport " + innerWidth + "x" + innerHeight);
       }
       const T1 = [...document.querySelectorAll(".tabs .tab")].filter(vis)[0]; if (T1) { await real(T1); await sleep(450); }
+    }
+
+    await ensureMode();
+    /* 10. the Study list: one thread, lessons that arrive on their own, a fold for the roads that are parked */
+    {
+      const tb = [...document.querySelectorAll(".tabs .tab")].filter(vis), stt = tb.find(x => /study/i.test(x.textContent || ""));
+      if (stt) {
+        await real(stt); await sleep(550);
+        const heads = [...document.querySelectorAll(".slist .sh")].map(h => (h.textContent || "").trim().toLowerCase());
+        check("Plan lists Today, Tomorrow and Later", ["today", "tomorrow", "later"].every(w => heads.includes(w)), heads.join(", "));
+        const nPlan = document.querySelectorAll(".slist .q").length;
+        check("Plan has Recall, today's lesson, tomorrow's and later ones (6+ rows)", nPlan >= 6, nPlan + " rows");
+        const saved = hostLog().filter(m => m.action === "study").pop();
+        const st = saved && saved.state;
+        if (window.__fixture && window.__fixture.auto) {
+          check("nothing pinned: today's lesson comes by itself, from the running road", st && st.todays && st.todays.length === 1 && st.todays[0].t === "ai", JSON.stringify(st && st.todays));
+        } else {
+          check("a lesson pinned before a skipped day is still today's lesson", st && st.todays && st.todays.some(x => x.t === "cv"), JSON.stringify(st && st.todays));
+        }
+        const sub = () => ((document.querySelector(".ssub .on") || {}).textContent || "").trim();
+        K("Tab"); await sleep(450);
+        const rowsR = () => [...document.querySelectorAll(".slist .q")].map(q => (q.textContent || "").trim());
+        const r0 = rowsR(), fold = [...document.querySelectorAll(".slist .q")].find(q => /parked/i.test(q.textContent || ""));
+        check("Roads: the running road, then one line for the parked ones", r0.length === 2 && !!fold, JSON.stringify(r0));
+        check("the running road shows where you are (n/total)", /\d+\/\d+/.test(r0[0] || ""), r0[0]);
+        if (fold) {
+          await real(fold); await sleep(300); K("Enter"); await sleep(450);
+          check("Enter on the fold shows the parked roads", rowsR().length > r0.length, rowsR().length + " rows");
+          const fold2 = [...document.querySelectorAll(".slist .q")].find(q => /parked/i.test(q.textContent || ""));
+          if (fold2) { await real(fold2); await sleep(300); K("Enter"); await sleep(450); check("and Enter again folds them away", rowsR().length === r0.length, rowsR().length + " rows"); }
+        }
+        K("Tab"); await sleep(300); K("Tab"); await sleep(300);
+        check("back on Plan", /plan/i.test(sub()), sub());
+        const t0 = tb[0]; if (t0) { await real(t0); await sleep(450); }
+      }
     }
 
     const realErrs = (window.__errs || []).filter(e => !/^Script error\./.test(e));

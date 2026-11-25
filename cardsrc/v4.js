@@ -53,12 +53,12 @@
     t.milestones = (t.milestones || []).map(m => Object.assign({}, m, { sessions: (m.sessions || []).map(x =>
       typeof x === "number" ? Object.assign({}, (t.sessions || [])[x - 1] || { title: "Lesson " + x }) : Object.assign({}, x)) }));
     if (t.kind === "road") t.milestones.forEach(m => {   // every milestone ends in a boss: build it without a tutorial
-      if (!m.sessions.some(x => x.boss)) m.sessions.push({ title: "Boss · " + m.name, resource: "No tutorial", minutes: 60, done: m.reached_when, boss: true });
+      if (!m.sessions.some(x => x.boss)) m.sessions.push({ title: "Boss · " + m.name, resource: "No tutorial", minutes: 30, done: m.reached_when, boss: true });
     });
     t.pos = { m: 0, s: 0 };
   });
   const MAX_PINS = LEARN.max_pins || 3;
-  const SS = { sel: Math.max(0, ST.findIndex(t => t.status === "focus")), li: 0, focus: "list", stop: -1, pins: [], todays: [], log: null, logs: [], drop: false };
+  const SS = { sel: Math.max(0, ST.findIndex(t => QLP.isActive(t.id))), showParked: false, li: 0, focus: "list", stop: -1, pins: [], todays: [], log: null, logs: [], drop: false };
   if (DEMO_STATE) {   // a SAMPLE state for screenshots, not your data
     ST.forEach(t => { const p = DEMO_STATE.pos[t.id]; if (p) { t.pos.m = Math.min(p[0], t.milestones.length - 1); t.pos.s = Math.min(p[1], ((t.milestones[t.pos.m] || {}).sessions || []).length - 1); } });
     (DEMO_STATE.today || []).forEach(id => { const ti = ST.findIndex(t => t.id === id); if (ti >= 0) SS.todays.push({ track: ti, m: ST[ti].pos.m, s: ST[ti].pos.s, done: false }); });
@@ -244,20 +244,42 @@
   const KIND_NAME = { book: "Reading", video: "Video", course: "Course", lab: "Hands-on", event: "Event" };
   const RECALL_G = '<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M13.3 6.4A5.5 5.5 0 1 0 13.1 10"/><path d="M13.7 2.6v3.9H9.8"/></svg>';
   const emblemOf = (t) => t.kind === "side" ? (KIND_G[t.type] || G.learn) : (EMB[t.id] || G.learn);
-  const suggested = () => { const ids = (LEARN.rhythm || {})[dayN(tomorrowIso)] || []; const i = ST.findIndex(t => t.id === ids[0]); return i >= 0 ? i : Math.max(0, ST.findIndex(t => t.status === "focus")); };
-  const itemTrack = (it) => !it ? SS.sel : it.kind === "slot" ? suggested() : (it.kind === "recall" || it.kind === "add") ? SS.sel : it.ti;
+  const suggested = () => { const i = ST.findIndex(t => t.id === QLP.roadFor(tomorrowIso)); return i >= 0 ? i : Math.max(0, ST.findIndex(t => QLP.isActive(t.id))); };
+  const isActiveRoad = (ti) => ST[ti].kind === "road" && QLP.isActive(ST[ti].id);
+  const lessonsOf = (t) => t.milestones.reduce((n, m) => n + m.sessions.length, 0);
+  const lessonsDone = (t) => t.milestones.reduce((n, m, mi) => n + (mi < t.pos.m ? m.sessions.length : mi === t.pos.m ? t.pos.s : 0), 0);
+  const minutesLeft = (t) => { let sum = 0; t.milestones.forEach((m, mi) => m.sessions.forEach((x, si) => { if (mi > t.pos.m || (mi === t.pos.m && si >= t.pos.s)) sum += x.minutes || 45; })); return sum; };
+  const hoursText = (min) => min < 60 ? min + " min" : "~" + (Math.round(min / 6) / 10) + " h";
+  const minText = (x) => x && x.minutes ? x.minutes + " min" : "";
+  /* the lessons of the next study days if you keep going: today's open lessons and tomorrow's pins counted as done */
+  const projection = (n) => {
+    const pos = ST.map(t => ({ m: t.pos.m, s: t.pos.s }));
+    const adv = (ti) => { const t = ST[ti], p = pos[ti]; p.s++; const m = t.milestones[p.m]; if (m && p.s >= m.sessions.length) { p.m++; p.s = 0; } };
+    openTodays().forEach(x => adv(x.track));
+    const out = [];
+    for (let d = 1; out.length < n && d <= 14; d++) {
+      const iso = addDays(wToday, d);
+      if (d === 1 && SS.pins.length) { SS.pins.forEach(p => adv(p.track)); continue; }
+      const ti = ST.findIndex(t => t.id === QLP.roadFor(iso)); if (ti < 0) continue;
+      const p = pos[ti], s = sessAt(ST[ti], p.m, p.s); if (!s) continue;
+      out.push({ ti, m: p.m, s: p.s, iso, dn: dayN(iso), day: d }); adv(ti);
+    }
+    return out;
+  };
+  const itemTrack = (it) => !it ? SS.sel : it.kind === "slot" ? suggested() : (it.kind === "recall" || it.kind === "add" || it.kind === "parked") ? SS.sel : it.ti;
   const recallLabel = (n) => "Recall · ~" + Math.max(1, Math.round(n * 25 / 60)) + " min";   // time, not a count of cards
   const picksFor = (busy) => {   // tonight's suggestions from the weekly rhythm: next lessons not pinned yet (1 while today is open or Recall waits)
     if (SS.pins.length >= Math.min(2, MAX_PINS) || (behind() && SS.pins.length)) return [];   // suggestions stop at 2 subjects; a 3rd is still yours to add
-    const ids = (LEARN.rhythm || {})[dayN(tomorrowIso)] || [];
+    const rid = QLP.roadFor(tomorrowIso), ids = rid ? [rid] : [];
     return ids.map(id => ST.findIndex(t => t.id === id))
       .filter(ti => ti >= 0 && !pinOf(ti) && sessAt(ST[ti], ST[ti].pos.m, ST[ti].pos.s) && !isToday(ti, ST[ti].pos.m, ST[ti].pos.s))
       .slice(0, busy || behind() ? 1 : MAX_PINS - SS.pins.length);
   };
-  const lineEl = (cls, glyph, title, tc, pre) => {   // one plate of the hub: a tile and a title, nothing else
+  const lineEl = (cls, glyph, title, tc, pre, mins) => {   // one plate of the hub: a tile and a title, and its length
     const q = el("div", "q pick " + cls); if (tc) q.style.setProperty("--tc", tc);
     const art = el("span", "qart"); art.innerHTML = glyph; q.appendChild(art);
     const mid = el("div"), tt = put(el("div", "t"), title); if (pre) tt.prepend(el("span", "pre", pre)); mid.appendChild(tt); q.appendChild(mid);
+    if (mins) q.appendChild(el("span", "smin", mins));
     q.appendChild(el("span", "mk")); return q;
   };
   const fadeIf = (box) => {   // a soft fade at the bottom only while more of the list is hidden below
@@ -302,19 +324,31 @@
       if (todays.length || rc) {   // Recall first, then the lessons pinned last night
         list.appendChild(shHead(G.lock, "Today"));
         if (rc) add({ kind: "recall", ti: null, el: lineEl("lslot s-recall", RECALL_G, recallLabel(rc)) });
-        todays.forEach(x => add({ kind: "today", x, ti: x.track, el: lineEl("lslot s-today" + (x.light ? " light" : ""), PIN_SM, itemTitle(x), null, x.light ? "Light" : null) }));
+        todays.forEach(x => add({ kind: "today", x, ti: x.track, el: lineEl("lslot s-today" + (x.light ? " light" : ""), PIN_SM, itemTitle(x), null, x.light ? "Light" : null, minText(sessAt(ST[x.track], x.m, x.s))) }));
       }
       list.appendChild(shHead(PIN_SM, "Tomorrow"));
-      SS.pins.forEach(x => add({ kind: "pin", x, ti: x.track, el: lineEl("lslot s-pinned", PIN_SM, itemTitle(x)) }));
-      const picks = picksFor(todays.length || rc);
-      picks.forEach(ti => { const t = ST[ti]; add({ kind: "pick", ti, el: lineEl("lslot s-pick", PIN_SM, t.short + ": " + ((sessAt(t, t.pos.m, t.pos.s) || {}).title || ""), null, day + "'s pick") }); });
-      if (!SS.pins.length && !picks.length) add({ kind: "slot", ti: null, el: lineEl("lslot s-none", PIN_SM, "Pick a lesson for " + day) });
+      SS.pins.forEach(x => add({ kind: "pin", x, ti: x.track, el: lineEl("lslot s-pinned", PIN_SM, itemTitle(x), null, null, minText(sessAt(ST[x.track], x.m, x.s))) }));
+      const proj = projection(5), tom = proj.find(z => z.day === 1);   // tomorrow's lesson is the one after today's, on the road that belongs to tomorrow
+      if (tom && !SS.pins.length) { const t = ST[tom.ti], x = sessAt(t, tom.m, tom.s); add({ kind: "pick", ti: tom.ti, m: tom.m, s: tom.s, el: lineEl("lslot s-pick", PIN_SM, t.short + ": " + (x.title || ""), null, day + "'s pick", minText(x)) }); }
+      if (!SS.pins.length && !tom) add({ kind: "slot", ti: null, el: lineEl("lslot s-none", PIN_SM, "Pick a lesson for " + day) });
+      const later = proj.filter(z => z.day > 1);
+      if (later.length) {
+        list.appendChild(shHead(G.learn, "Later"));
+        later.forEach(z => { const t = ST[z.ti], x = sessAt(t, z.m, z.s); add({ kind: "next", ti: z.ti, m: z.m, s: z.s, el: lineEl("lslot s-next", emblemOf(t), t.short + ": " + (x.title || ""), t.color, z.dn, minText(x)) }); });
+      }
     } else {
       const side = SS.sub === "side";
-      ST.forEach((t, ti) => {
-        if ((t.kind === "side") !== side) return;
-        const q = lineEl(side ? "sq side" : "sq", side ? (KIND_G[t.type] || G.learn) : (EMB[t.id] || G.learn), t.name, t.color); markTrack(q, ti); add({ kind: "track", ti, el: q });
-      });
+      const roadRow = (t, ti, cls) => { const q = lineEl(side ? "sq side" : "sq" + (cls || ""), side ? (KIND_G[t.type] || G.learn) : (EMB[t.id] || G.learn), t.name, t.color, null, !side && lessonsOf(t) ? lessonsDone(t) + "/" + lessonsOf(t) : ""); markTrack(q, ti); add({ kind: "track", ti, el: q }); };
+      if (side) ST.forEach((t, ti) => { if (t.kind === "side") roadRow(t, ti); });
+      else {
+        const roads = ST.map((t, ti) => ti).filter(ti => ST[ti].kind !== "side" && lessonsOf(ST[ti]) > 0);
+        const run = roads.filter(isActiveRoad), parked = roads.filter(ti => !isActiveRoad(ti));
+        run.forEach(ti => roadRow(ST[ti], ti));
+        if (parked.length) {
+          add({ kind: "parked", ti: null, el: lineEl("lslot s-parked", G.lock, parked.length + " parked", null, null, SS.showParked ? "hide" : "show") });
+          if (SS.showParked) parked.forEach(ti => roadRow(ST[ti], ti, " parked"));
+        }
+      }
       if (side) add({ kind: "add", ti: null, el: lineEl("add", EMB.add, "Add") });
     }
     lnb.appendChild(list); fadeIf(list);
@@ -323,6 +357,7 @@
   const openItem = () => {   // Enter / →: open what is under the cursor
     const it = sItems[SS.li];
     if (it && it.kind === "slot") return setSub("roads");
+    if (it && it.kind === "parked") { SS.showParked = !SS.showParked; const at = SS.li; renderStudyList(true); SS.li = Math.min(at, sItems.length - 1); markSel(); sfx("select", 0); updateButtons(); return; }
     if (it && it.kind === "add") return toast(inApp ? "New roads go in learn.json" : "Preview: would add a road or a side quest");
     focusMap();
   };
@@ -354,7 +389,8 @@
     const head = el("div", "shead"), em = el("span", "semb"); em.innerHTML = emblemOf(t); head.appendChild(em);
     const tt = el("div"); tt.appendChild(put(el("div", "stitle"), t.name));
     const last = t.milestones[t.milestones.length - 1];
-    tt.appendChild(put(el("div", "sgoal"), t.kind === "side" ? "Side quest · " + (KIND_NAME[t.type] || "Learning") : "Goal · " + (last ? last.name : t.end_goal || ""))); head.appendChild(tt);
+    const nL = lessonsOf(t), dL = lessonsDone(t), prog = t.kind !== "side" && nL ? (dL >= nL ? "Finished" : "Lesson " + (dL + 1) + " of " + nL + " · " + hoursText(minutesLeft(t)) + " left") : "";
+    tt.appendChild(put(el("div", "sgoal"), t.kind === "side" ? "Side quest · " + (KIND_NAME[t.type] || "Learning") : (prog ? prog + " · " : "") + "Goal · " + (last ? last.name : t.end_goal || ""))); head.appendChild(tt);
     smap.appendChild(head);
     const area = el("div", "sarea"); smap.appendChild(area);
     capEl = el("div", "desc scap"); smap.appendChild(capEl);
@@ -642,11 +678,12 @@
     if (leaving) return;
     if (SS.mode === "recall") return;
     const it = sItems[SS.li], onMap = SS.focus === "map" && (full || gOpen);
-    if (!onMap && it && it.kind === "add") return;
+    if (!onMap && it && (it.kind === "add" || it.kind === "parked")) return;
+    if (!onMap && it && it.kind === "next") { toast("Tomorrow's lesson only"); return; }
     if (!onMap && it && it.kind === "pin") { SS.pins = SS.pins.filter(p => p !== it.x); sfx("undo", 0); afterPin(); return; }
     if (!onMap && it && it.kind === "today") { toast("Already today's"); return; }
     const ti = onMap ? SS.sel : itemTrack(it), t = ST[ti]; if (!t) return;
-    const m = t.pos.m, s = t.pos.s;
+    const m = !onMap && it && it.kind === "pick" && it.m != null ? it.m : t.pos.m, s = !onMap && it && it.kind === "pick" && it.m != null ? it.s : t.pos.s;   // a pick pins the lesson it shows (the one after today's)
     if (onMap) {
       const st = stops[SS.stop], ls = st && st.kind === "s" ? lessonState(t, st.m, st.s) : "";
       if (ls === "done") { toast("Already done"); return; }
@@ -811,13 +848,13 @@
     kTrack.querySelector("i").textContent = "P";
     const pinnedHere = onMap ? !!(st && st.kind === "s" && isPinned(SS.sel, st.m, st.s)) : (it.kind === "pin" || (it.kind === "track" && !!pinOf(it.ti)));
     const canPin = onMap ? !!(st && st.kind === "s" && (pinnedHere || (lessonState(t, st.m, st.s) === "next" && !isToday(SS.sel, st.m, st.s))))
-      : it.kind !== "today" && it.kind !== "add" && (pinnedHere || !!(t && sessAt(t, t.pos.m, t.pos.s)));
+      : it.kind !== "today" && it.kind !== "add" && it.kind !== "parked" && it.kind !== "next" && (pinnedHere || !!(t && sessAt(t, t.pos.m, t.pos.s)));
     kTrack.hidden = !!SS.log || !t || !canPin;
     setLabel(kTrack, pinnedHere ? "Unpin" : "Pin for tomorrow");
     const tx = todayAt();
     if (tx && !SS.log) { kTrack.hidden = false; setLabel(kTrack, tx.light ? "Full" : "Light"); kTrack.querySelector("i").textContent = "L"; }
     kDone.hidden = !todayOpen() || !!SS.log; setLabel(kDone, "Done");
-    setLabel(kOpen, SS.log ? "Save" : !onMap ? (it.kind === "slot" ? "Roads" : it.kind === "add" ? "Add" : t && t.kind === "side" ? "Steps" : "Road") : st && st.kind === "s" ? "Open lesson" : (t && t.kind === "side" ? "Steps" : "Road"));
+    setLabel(kOpen, SS.log ? "Save" : !onMap ? (it.kind === "slot" ? "Roads" : it.kind === "add" ? "Add" : it.kind === "parked" ? (SS.showParked ? "Hide" : "Show") : t && t.kind === "side" ? "Steps" : "Road") : st && st.kind === "s" ? "Open lesson" : (t && t.kind === "side" ? "Steps" : "Road"));
     kMode.hidden = !!SS.log || (gOpen && !full);
     const sx = onMap && st && st.kind === "s" ? (sessAt(t, st.m, st.s) || {}) : null;   // Enter on the map opens the material; a milestone or a boss without a link has nothing to open
     kOpen.hidden = !SS.log && onMap && (!sx || !sx.url);

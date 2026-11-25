@@ -151,7 +151,8 @@
       const f = THEME_HELP.itemInfo(it), q = it.el;
       if (it.kind === "slot" || it.kind === "add" || f.none) return;
       upd(q, "bf-mn", 2, f.min ? THEME_HELP.two(f.min) : "--", f.min ? "min" : "none");
-      upd(q, "bf-st", 8, it.kind === "pin" ? "PINNED" : it.kind === "pick" ? "PICK" : "TODAY", it.kind === "today" || it.kind === "recall" ? "next" : "open");
+      const day = it.kind === "next" ? ((q.querySelector(".pre") || {}).textContent || "LATER").trim().toUpperCase() : "";   // a later lesson says which day it is for
+      upd(q, "bf-st", 8, it.kind === "pin" ? "PINNED" : it.kind === "pick" ? "PICK" : it.kind === "next" ? day : "TODAY", it.kind === "today" || it.kind === "recall" ? "next" : "open");
     };
 
     const build = () => {

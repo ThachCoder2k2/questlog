@@ -50,15 +50,41 @@ REAL = r'''
   const DEMO = null, DEMO_STATE = null;
   const isoDay = (d) => d.getFullYear() + "-" + String(d.getMonth() + 1).padStart(2, "0") + "-" + String(d.getDate()).padStart(2, "0");
   const STUDY_TODAY = isoDay(new Date());
+  /* which road's lesson belongs to a day. One thread at a time: learn.json "active" lists the roads that run (else the ones marked focus),
+     "days" the weekdays that have a lesson (else every day); a "rhythm" entry may still pick the road for a weekday. Several active roads take turns. */
+  const QLP = (() => {
+    const DN = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
+    const roads = (LEARN.tracks || []).filter(t => (t.kind || "road") === "road");
+    const act = Array.isArray(LEARN.active) && LEARN.active.length ? roads.filter(t => LEARN.active.includes(t.id)) : roads.filter(t => t.status === "focus");
+    const days = Array.isArray(LEARN.days) ? LEARN.days : null;
+    const dayOf = (iso) => { const p = iso.split("-").map(Number); return new Date(p[0], p[1] - 1, p[2]); };
+    return {
+      active: act.map(t => t.id),
+      isActive: (id) => act.some(t => t.id === id),
+      roadFor: (iso) => {   // the road for this day, or null on a day without a lesson
+        const d = dayOf(iso), dn = DN[d.getDay()];
+        if (days && !days.includes(dn)) return null;
+        const raw = (LEARN.rhythm || {})[dn];
+        if (Array.isArray(raw) && !raw.length) return null;
+        const ids = (raw || []).filter(id => act.some(t => t.id === id));
+        if (ids.length) return ids[0];
+        return act.length ? act[Math.floor(d.getTime() / 864e5) % act.length].id : null;
+      } };
+  })();
   /* a new day: last night's pins become today's locked lessons (only when they were pinned yesterday); yesterday's open lessons are let go */
   const STUDY0 = (() => {
     const s = ENV0.study && typeof ENV0.study === "object" ? JSON.parse(JSON.stringify(ENV0.study)) : null;
     if (!s) return null;
     s.pins = Array.isArray(s.pins) ? s.pins : []; s.todays = Array.isArray(s.todays) ? s.todays : [];
-    if (s.day !== STUDY_TODAY) {
-      const y = new Date(); y.setDate(y.getDate() - 1);
-      s.todays = s.day === isoDay(y) ? s.pins.map(p => { const q = Object.assign({}, p, { done: false, light: false }); delete q.line; return q; }) : [];
+    if (s.day !== STUDY_TODAY) {   // a new day: what was pinned (whenever it was pinned) is today's lesson; yesterday's open lessons are let go (the road never moved past them)
+      s.todays = s.pins.map(p => { const q = Object.assign({}, p, { done: false, light: false }); delete q.line; return q; });
       s.pins = []; s.day = STUDY_TODAY;
+    }
+    const kind0 = (window.QL_DATA || {}).kind;
+    if (!s.todays.length && (kind0 === "morning" || kind0 === "midday")) {   // nothing pinned: today's lesson comes by itself, the next one on the road that belongs to today
+      const id = QLP.roadFor(STUDY_TODAY), t = id && (LEARN.tracks || []).find(x => x.id === id), p = t && (s.pos || {})[id] || [0, 0];
+      const ms = t && (t.milestones || [])[p[0]];
+      if (ms && p[1] <= (ms.sessions || []).length) s.todays.push({ t: id, m: p[0], s: p[1], done: false, light: false });
     }
     return s;
   })();

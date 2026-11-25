@@ -46,6 +46,8 @@
     const itemInfo = (it) => {
       if (it.kind === "recall") return { pict: "recall", min: recallMin() };
       if (it.kind === "today" || it.kind === "pin") return sessInfo(it.x);
+      if (it.kind === "next") return sessInfo({ track: it.ti, m: it.m, s: it.s });
+      if (it.kind === "parked") return { pict: "lock", min: 0, none: true };
       if (it.kind === "pick") { const t = ST[it.ti]; return sessInfo({ track: it.ti, m: t.pos.m, s: t.pos.s }); }
       if (it.kind === "slot") return { pict: "pin", min: 0, none: true };
       if (it.kind === "add") return { pict: "add", min: 0, none: true };

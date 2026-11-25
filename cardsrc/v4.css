@@ -285,3 +285,8 @@
 
 /* while a theme is being switched nothing may transition or animate from the old look to the new one */
 html.qlfreeze *, html.qlfreeze *::before, html.qlfreeze *::after { transition: none !important; animation-duration: 0s !important; animation-delay: 0s !important; }
+
+/* Study: the length of a lesson, and the roads that are parked */
+.slist .q .smin { margin-left: auto; padding: 0 8px; font: 600 13px var(--font); color: #9DBCCB; white-space: nowrap; align-self: center; }
+html[data-theme] .slist .q .smin { display: none; }   /* a theme draws the length in its own way (its minute cells) */
+.slist .q.parked { opacity: .62; }

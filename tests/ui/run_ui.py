@@ -41,18 +41,19 @@ def card_json(mode):
             "week": week, "sections": [{"heading": "Today", "items": items}], "url": "https://app.notion.com/p/" + H(99), "timeoutSec": 1800}
 def sess(n, m): return {"title": "Lesson %d: %s" % (n, m), "resource": "A video", "url": "https://example.com/%d" % n, "minutes": 45, "done": "A file that runs", "min": "Open it and run one cell", "recall": "Why does it work?", "setup": "Python 3"}
 LEARN = {"target_hours": 6, "start": "2026-11-19", "max_pins": 3, "recall_cap": 20, "recall_retention": 0.9, "recall_leech": 4, "recall_valve": [15, 0.85],
-         "rhythm": {d: ["ai"] if i % 2 == 0 else ["cv"] for i, d in enumerate(["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"])},
+         "active": ["ai"],   # one road runs, the other is parked
          "tracks": [{"id": i, "name": n, "short": s, "color": c, "status": "focus", "kind": "road", "goal": "g", "project": "p", "end_goal": "e", "total": 8, "weeks": 4,
                      "sessions": [sess(k, s) for k in range(1, 4)], "milestones": [{"name": "Basics", "reached_when": "It runs", "sessions": [1, 2, 3]}, {"name": "Next", "reached_when": "It ships", "sessions": [1, 2]}]}
                     for i, n, s, c in (("ai", "AI engineering", "AI", "#8FE6FF"), ("cv", "Vision", "Vision", "#9BE38B"))]}
-def study():
-    return {"v": 1, "day": "2026-11-24", "pos": {"ai": [0, 1], "cv": [0, 0]}, "pins": [{"t": "cv", "m": 0, "s": 0}], "todays": [],
+def study(auto=False):   # an old day, so the day changes: with nothing pinned today's lesson must come by itself; a pin from before a skipped day must still be today's lesson
+    return {"v": 1, "day": "2026-11-20", "pos": {"ai": [0, 1], "cv": [0, 0]}, "pins": [] if auto else [{"t": "cv", "m": 0, "s": 0}], "todays": [],
             "cards": [{"t": "ai", "m": 0, "s": 0, "q": "Why does it work?", "a": "Because", "S": 3.7, "D": 5.0, "lapses": 0, "parked": False, "due": "2026-11-25", "last": "2026-11-21"}], "logs": [], "recallDays": []}
 bad = 0; slow = []; rows = []; notes = []; allsteps = {}
 for k in keys:
     for mode in a.modes.split(","):
-        data = card_json(mode); env = {"notion": True, "queue": True, "maxHeight": 860, "mode": mode.split("-")[0], "learn": LEARN, "study": study(), "theme": k}
-        pre = "<script>%s</script><script>window.QL_DATA=%s;window.QL_ENV=%s;</script>" % ((HERE / "wrap.js").read_text(), json.dumps(data), json.dumps(env))
+        auto = "auto" in mode
+        data = card_json(mode); env = {"notion": True, "queue": True, "maxHeight": 860, "mode": mode.split("-")[0], "learn": LEARN, "study": study(auto), "theme": k}
+        pre = "<script>%s</script><script>window.__fixture=%s;window.QL_DATA=%s;window.QL_ENV=%s;</script>" % ((HERE / "wrap.js").read_text(), json.dumps({"auto": auto}), json.dumps(data), json.dumps(env))
         post = "<script>setTimeout(() => window.QL_GO && window.QL_GO(), 200);</script><script>%s</script>" % (HERE / "robot.js").read_text()
         page = tmp / ("%s-%s.html" % (k, mode)); page.write_text(html.replace("<head>", "<head>" + pre, 1).replace("</body>", post + "</body>", 1))
         if os.environ.get("QLUI_KEEP"): print("page:", page)
