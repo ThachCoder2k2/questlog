@@ -1797,7 +1797,7 @@
   let touched = false;
   document.addEventListener("pointerdown", () => { if (performance.now() - goAt >= 800) touched = true; }, true);
   document.addEventListener("pointerdown", (e) => {   // a click on the dimmed backdrop shrinks to the corner card
-    if (full && !e.target.closest(".stage") && performance.now() - goAt >= 800) setFull(false);
+    if (full && !e.target.closest(".stage, .thm") && performance.now() - goAt >= 800) setFull(false);   // .thm: the theme list sits outside the stage; clicking it is not clicking the backdrop
   });
   const KEYPROMPT = { Enter: "kOpen", " ": "kAct", b: "kBoard", B: "kBoard", Escape: "kClose", t: "kTrack", T: "kTrack", m: "kMode", M: "kMode", s: "kSnooze", S: "kSnooze", d: "kDone", D: "kDone" };
   const flash = (id) => { const b = document.getElementById(id); if (!b || b.hidden) return; b.classList.add("hit"); setTimeout(() => b.classList.remove("hit"), 140); };
@@ -1888,8 +1888,9 @@
     const h = window.QL_HOLD_H || Math.ceil(cardEl.getBoundingClientRect().height);   // QL_HOLD_H: the theme list is open, keep the window as it is
     if (h && h !== lastH) { lastH = h; post({ action, height: h }); }
     const dz = Math.ceil(hd.getBoundingClientRect().bottom - cardEl.getBoundingClientRect().top);
-    const cb = cardEl.getBoundingClientRect(), dzKey = dz + ":" + Math.round(cb.left);
-    if (dz && dzKey !== lastDrag) { lastDrag = dzKey; post({ action: "dragzone", height: dz, x0: Math.round(cb.left), x1: Math.round(cb.right) }); }
+    const dy = Math.max(0, Math.floor(hd.getBoundingClientRect().top - cardEl.getBoundingClientRect().top));   // the band starts at the header: the tabs row above it is buttons, not a handle
+    const cb = cardEl.getBoundingClientRect(), dzKey = dz + ":" + dy + ":" + Math.round(cb.left);
+    if (dz && dzKey !== lastDrag) { lastDrag = dzKey; post({ action: "dragzone", height: dz, y0: dy, x0: Math.round(cb.left), x1: Math.round(cb.right) }); }
     if (detailRow) positionDetail();
     placeCursor(); edge();
   };

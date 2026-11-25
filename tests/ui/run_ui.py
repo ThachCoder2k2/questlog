@@ -48,7 +48,7 @@ LEARN = {"target_hours": 6, "start": "2026-11-19", "max_pins": 3, "recall_cap": 
 def study():
     return {"v": 1, "day": "2026-11-24", "pos": {"ai": [0, 1], "cv": [0, 0]}, "pins": [{"t": "cv", "m": 0, "s": 0}], "todays": [],
             "cards": [{"t": "ai", "m": 0, "s": 0, "q": "Why does it work?", "a": "Because", "S": 3.7, "D": 5.0, "lapses": 0, "parked": False, "due": "2026-11-25", "last": "2026-11-21"}], "logs": [], "recallDays": []}
-bad = 0; slow = []; rows = []; notes = []
+bad = 0; slow = []; rows = []; notes = []; allsteps = {}
 for k in keys:
     for mode in a.modes.split(","):
         data = card_json(mode); env = {"notion": True, "queue": True, "maxHeight": 860, "mode": mode.split("-")[0], "learn": LEARN, "study": study(), "theme": k}
@@ -68,6 +68,9 @@ for k in keys:
         if res.get("timedOut"): fails.append({"name": "the robot did not finish in time", "info": ""})
         if errs: fails.append({"name": "script errors", "info": " ; ".join(errs[:3])})
         for ce in (probe.get('cbErrs') or [])[:3]: print(f"      caught in a callback [{k}/{mode}]: {ce}")
+        if os.environ.get("QLUI_LOG"):
+            for m in res.get("log", []): print(f"    [{k}/{mode}] host got {m.get('t'):6} {m.get('action')} {({kk: vv for kk, vv in m.items() if kk not in ('action', 't')})}"[:200])
+        for s in probe.get("steps", []): allsteps.setdefault(re.sub(r" #\d+$", "", s["name"]), []).append((s["sync"], s["gap"], k, mode))
         if os.environ.get("QLUI_STEPS"):
             for s in probe.get("steps", []): print(f"    [{k}/{mode}] {s['name'][:34]:34s} sync {s['sync']:4d} gap {s['gap']:4d} vp {s['vp']} {s['posts']}")
         for s in probe.get("steps", []):
@@ -83,5 +86,9 @@ for k, mode, ok, nf in rows: print(f"  {k:9s} {mode:8s} {ok:3d} / {nf}")
 print("\nslow steps (sync ms > %d or frame gap ms > %d):" % (a.slow_sync, a.slow_gap))
 for k, mode, s in sorted(slow, key=lambda x: -max(x[2]["sync"], x[2]["gap"]))[:25]:
     print(f"  {k:9s} {mode:8s} {s['name'][:34]:34s} sync {s['sync']:4d}  gap {s['gap']:4d}  posts {s['posts']} {s.get('err','')}")
+print("\nevery kind of step, worst case over all themes and modes (sync = ms the page spent on it, gap = longest wait between two frames):")
+for name, v in sorted(allsteps.items(), key=lambda x: -max(g for _, g, _, _ in x[1]))[:40]:
+    ws = max(v, key=lambda z: z[0]); wg = max(v, key=lambda z: z[1]); med = sorted(g for _, g, _, _ in v)[len(v) // 2]
+    print(f"  {name[:40]:40s} n={len(v):3d}  sync max {ws[0]:4d}  gap median {med:4d} max {wg[1]:4d} ({wg[2]}/{wg[3]})")
 for n in notes: print("note:", n)
 print("\n%d failed check(s)" % bad); sys.exit(1 if bad else 0)

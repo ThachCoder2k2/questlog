@@ -30,6 +30,7 @@ final class KeyPanel: NSPanel {
 /// Takes the first click even when the panel is not key, and lets the card header drag the window.
 final class CardWebView: WKWebView {
     var dragZone: CGFloat = 0
+    var dragY0: CGFloat = 0   // the band starts here: the tabs row above the card's header holds buttons, so it is not a handle
     var dragX: ClosedRange<CGFloat> = 0...CGFloat.greatestFiniteMagnitude   // only the card's own header drags, not the side panel
     var onDragEnd: (() -> Void)?
 
@@ -38,7 +39,7 @@ final class CardWebView: WKWebView {
     override func mouseDown(with event: NSEvent) {
         let p = convert(event.locationInWindow, from: nil)
         let fromTop = isFlipped ? p.y : bounds.height - p.y
-        if dragZone > 0, fromTop >= 0, fromTop < dragZone, dragX.contains(p.x), let window = window {
+        if dragZone > 0, fromTop >= dragY0, fromTop < dragZone, dragX.contains(p.x), let window = window {
             window.performDrag(with: event)   // returns on mouse-up
             onDragEnd?()
             return
@@ -563,6 +564,7 @@ final class CardController: NSObject, NSApplicationDelegate, WKScriptMessageHand
             if shown { resize(height: h) } else { show(height: h) }
         case "dragzone":
             web.dragZone = (body["height"] as? NSNumber).map { CGFloat(truncating: $0) } ?? 0
+            web.dragY0 = (body["y0"] as? NSNumber).map { CGFloat(truncating: $0) } ?? 0
             if let x0 = body["x0"] as? NSNumber, let x1 = body["x1"] as? NSNumber, x1.doubleValue > x0.doubleValue {
                 web.dragX = CGFloat(truncating: x0)...CGFloat(truncating: x1)
             }
