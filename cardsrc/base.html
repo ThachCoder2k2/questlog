@@ -1885,7 +1885,7 @@
     if (!fitting && +ENV.maxHeight && Math.ceil(cardEl.getBoundingClientRect().height) > +ENV.maxHeight) {
       fitting = true; fitToScreen(); fitting = false;   // the wheel or the stamp appeared: keep the footer on screen
     }
-    const h = Math.ceil(cardEl.getBoundingClientRect().height);
+    const h = window.QL_HOLD_H || Math.ceil(cardEl.getBoundingClientRect().height);   // QL_HOLD_H: the theme list is open, keep the window as it is
     if (h && h !== lastH) { lastH = h; post({ action, height: h }); }
     const dz = Math.ceil(hd.getBoundingClientRect().bottom - cardEl.getBoundingClientRect().top);
     const cb = cardEl.getBoundingClientRect(), dzKey = dz + ":" + Math.round(cb.left);

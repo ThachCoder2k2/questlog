@@ -282,3 +282,6 @@
   .slist.more, .wcb.more { display: block; margin: 0; font-size: inherit; color: inherit; }
   .slist.more::after, .wcb.more::after { content: none; }
   body.full .slist.more { flex: 1; min-height: 0; }
+
+/* while a theme is being switched nothing may transition or animate from the old look to the new one */
+html.qlfreeze *, html.qlfreeze *::before, html.qlfreeze *::after { transition: none !important; animation-duration: 0s !important; animation-delay: 0s !important; }

@@ -129,8 +129,9 @@
     const lcdTest = () => {
       const X = THEME_EXT[TH()]; if (X && X.onEnter) { try { X.onEnter(); } catch (e) { /* decoration only */ } }
       if (TH() !== "lcd") return; document.body.classList.add("ltest"); setTimeout(() => document.body.classList.remove("ltest"), 520); };
-    let lastTheme = TH();
-    new MutationObserver(() => { if (TH() !== lastTheme) { lastTheme = TH(); lcdTest(); } }).observe(root, { attributes: true, attributeFilter: ["data-theme"] });
+    let lastTheme = TH(), enterDue = false;
+    new MutationObserver(() => { if (TH() !== lastTheme) { lastTheme = TH(); if (window.QL_PREVIEW) enterDue = true; else lcdTest(); } }).observe(root, { attributes: true, attributeFilter: ["data-theme"] });
+    window.QL_THEME_ENTERED = (play) => { const d = enterDue; enterDue = false; if (play && d) lcdTest(); };   // the picker closed: a kept theme does its entrance once; a cancelled preview does not
     if (document.body.classList.contains("go")) lcdTest();
     else new MutationObserver((m, o) => { if (document.body.classList.contains("go")) { o.disconnect(); lcdTest(); } }).observe(document.body, { attributes: true, attributeFilter: ["class"] });
 

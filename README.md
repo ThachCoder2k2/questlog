@@ -461,6 +461,9 @@ tests/run.sh
 About 230 checks (time windows, catch-up, queue and sync, deadlines, quick add, phone push, evening numbers…) in a
 throw-away sandbox: a temp copy of the scripts, a fake `questcard` and `osascript`, the network stubbed. It touches no
 real state and sends nothing to Notion or ntfy.sh.
+
+The card itself has a UI robot: `python3 tests/ui/run_ui.py` clicks and types through every theme in the corner card and
+the full card in a real WebKit view (see `tests/ui/README.md`).
 </details>
 
 ## Status

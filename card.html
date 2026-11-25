@@ -1026,6 +1026,9 @@
   .slist.more, .wcb.more { display: block; margin: 0; font-size: inherit; color: inherit; }
   .slist.more::after, .wcb.more::after { content: none; }
   body.full .slist.more { flex: 1; min-height: 0; }
+
+/* while a theme is being switched nothing may transition or animate from the old look to the new one */
+html.qlfreeze *, html.qlfreeze *::before, html.qlfreeze *::after { transition: none !important; animation-duration: 0s !important; animation-delay: 0s !important; }
   @media (prefers-reduced-motion: reduce) {
     *, *::before, *::after { animation: none !important; transition: none !important; }
     body:not(.go) .card, body:not(.go) .anim, body:not(.go) .q { opacity: 1; }
@@ -5888,7 +5891,19 @@
   {
     const THEMES = window.QL_THEMES || [["tablet", "Tablet", []]], root = document.documentElement, KEY = "ql.theme";
     const load = () => { try { return localStorage.getItem(KEY); } catch (e) { return null; } };
-    const apply = (k) => { if (!k || k === "tablet") delete root.dataset.theme; else root.dataset.theme = k; if (tab === "learn" && (full || gOpen)) nextFrame(renderMap); };
+    let freezeT = 0;
+    const apply = (k) => {
+      if ((root.dataset.theme || "tablet") === (k || "tablet")) return;
+      root.classList.add("qlfreeze");   // a theme switch must not start hundreds of colour and position transitions at once: they are what made it stutter
+      if (!k || k === "tablet") delete root.dataset.theme; else root.dataset.theme = k;
+      if (tab === "learn" && (full || gOpen)) nextFrame(renderMap);
+      cancelAnimationFrame(freezeT); freezeT = requestAnimationFrame(() => { freezeT = requestAnimationFrame(() => root.classList.remove("qlfreeze")); });
+    };
+    const holdWindow = (on) => {   // the corner card's window follows the card's height: while the list is open it keeps one height (the list must fit), and the window moves once, not on every preview
+      if (full) { window.QL_HOLD_H = 0; return; }
+      window.QL_HOLD_H = on ? Math.max(Math.ceil(cardEl.getBoundingClientRect().height), Math.ceil(panel.offsetHeight) + 48) : 0;
+      report("resize");
+    };
     let cur = params.get("theme") || (window.QL_ENV || {}).theme || load() || "tablet", before = cur, ti = 0;
     if (!THEMES.some(t => t[0] === cur)) cur = "tablet";
     apply(cur);
@@ -5907,10 +5922,16 @@
       if (n >= 0) { e.stopPropagation(); pickT(n); keepT(); }
     });
     ov.appendChild(panel); document.body.appendChild(ov);
-    const pickT = (i) => { const n = (i + rowsT.length) % rowsT.length; if (n !== ti) sfx("move"); ti = n; rowsT.forEach((r, j) => { r.classList.toggle("sel", j === ti); r.setAttribute("aria-selected", j === ti); }); apply(THEMES[ti][0]); };
-    const openT = () => { before = cur; ov.hidden = false; ti = -1; pickT(Math.max(0, THEMES.findIndex(t => t[0] === cur))); };
-    const keepT = () => { cur = THEMES[ti][0]; ov.hidden = true; try { localStorage.setItem(KEY, cur); } catch (e) {} post({ action: "theme", name: cur }); sfx("select", 0); };
-    const backT = () => { apply(before); cur = before; ov.hidden = true; sfx("cancel", 0); };
+    let applyT = 0;
+    const pickT = (i) => {   // the highlight moves at once; the whole card is re-skinned once the arrows pause (re-skinning costs ~100 ms: not once per key repeat)
+      const n = (i + rowsT.length) % rowsT.length; if (n !== ti) sfx("move"); ti = n;
+      rowsT.forEach((r, j) => { r.classList.toggle("sel", j === ti); r.setAttribute("aria-selected", j === ti); });
+      const k = THEMES[ti][0]; clearTimeout(applyT); applyT = setTimeout(() => apply(k), 70);
+    };
+    const openT = () => { before = cur; window.QL_PREVIEW = true; ov.hidden = false; holdWindow(true); ti = -1; pickT(Math.max(0, THEMES.findIndex(t => t[0] === cur))); };
+    const closeT = (play) => { window.QL_PREVIEW = false; ov.hidden = true; if (window.QL_THEME_ENTERED) window.QL_THEME_ENTERED(play); holdWindow(false); };
+    const keepT = () => { cur = THEMES[ti][0]; clearTimeout(applyT); apply(cur); closeT(true); try { localStorage.setItem(KEY, cur); } catch (e) {} post({ action: "theme", name: cur }); sfx("select", 0); };
+    const backT = () => { clearTimeout(applyT); apply(before); cur = before; closeT(false); sfx("cancel", 0); };
     ov.addEventListener("click", (e) => { if (e.target === ov) backT(); });
     window.addEventListener("keydown", (e) => {
       if (e.target && e.target.closest && e.target.closest("input, textarea")) return;
@@ -6063,8 +6084,9 @@
     const lcdTest = () => {
       const X = THEME_EXT[TH()]; if (X && X.onEnter) { try { X.onEnter(); } catch (e) { /* decoration only */ } }
       if (TH() !== "lcd") return; document.body.classList.add("ltest"); setTimeout(() => document.body.classList.remove("ltest"), 520); };
-    let lastTheme = TH();
-    new MutationObserver(() => { if (TH() !== lastTheme) { lastTheme = TH(); lcdTest(); } }).observe(root, { attributes: true, attributeFilter: ["data-theme"] });
+    let lastTheme = TH(), enterDue = false;
+    new MutationObserver(() => { if (TH() !== lastTheme) { lastTheme = TH(); if (window.QL_PREVIEW) enterDue = true; else lcdTest(); } }).observe(root, { attributes: true, attributeFilter: ["data-theme"] });
+    window.QL_THEME_ENTERED = (play) => { const d = enterDue; enterDue = false; if (play && d) lcdTest(); };   // the picker closed: a kept theme does its entrance once; a cancelled preview does not
     if (document.body.classList.contains("go")) lcdTest();
     else new MutationObserver((m, o) => { if (document.body.classList.contains("go")) { o.disconnect(); lcdTest(); } }).observe(document.body, { attributes: true, attributeFilter: ["class"] });
 
@@ -6485,7 +6507,7 @@
     if (!fitting && +ENV.maxHeight && Math.ceil(cardEl.getBoundingClientRect().height) > +ENV.maxHeight) {
       fitting = true; fitToScreen(); fitting = false;   // the wheel or the stamp appeared: keep the footer on screen
     }
-    const h = Math.ceil(cardEl.getBoundingClientRect().height);
+    const h = window.QL_HOLD_H || Math.ceil(cardEl.getBoundingClientRect().height);   // QL_HOLD_H: the theme list is open, keep the window as it is
     if (h && h !== lastH) { lastH = h; post({ action, height: h }); }
     const dz = Math.ceil(hd.getBoundingClientRect().bottom - cardEl.getBoundingClientRect().top);
     const cb = cardEl.getBoundingClientRect(), dzKey = dz + ":" + Math.round(cb.left);

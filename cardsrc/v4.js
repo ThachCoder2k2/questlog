@@ -1128,7 +1128,19 @@
   {
     const THEMES = window.QL_THEMES || [["tablet", "Tablet", []]], root = document.documentElement, KEY = "ql.theme";
     const load = () => { try { return localStorage.getItem(KEY); } catch (e) { return null; } };
-    const apply = (k) => { if (!k || k === "tablet") delete root.dataset.theme; else root.dataset.theme = k; if (tab === "learn" && (full || gOpen)) nextFrame(renderMap); };
+    let freezeT = 0;
+    const apply = (k) => {
+      if ((root.dataset.theme || "tablet") === (k || "tablet")) return;
+      root.classList.add("qlfreeze");   // a theme switch must not start hundreds of colour and position transitions at once: they are what made it stutter
+      if (!k || k === "tablet") delete root.dataset.theme; else root.dataset.theme = k;
+      if (tab === "learn" && (full || gOpen)) nextFrame(renderMap);
+      cancelAnimationFrame(freezeT); freezeT = requestAnimationFrame(() => { freezeT = requestAnimationFrame(() => root.classList.remove("qlfreeze")); });
+    };
+    const holdWindow = (on) => {   // the corner card's window follows the card's height: while the list is open it keeps one height (the list must fit), and the window moves once, not on every preview
+      if (full) { window.QL_HOLD_H = 0; return; }
+      window.QL_HOLD_H = on ? Math.max(Math.ceil(cardEl.getBoundingClientRect().height), Math.ceil(panel.offsetHeight) + 48) : 0;
+      report("resize");
+    };
     let cur = params.get("theme") || load() || "tablet", before = cur, ti = 0;
     if (!THEMES.some(t => t[0] === cur)) cur = "tablet";
     apply(cur);
@@ -1147,10 +1159,16 @@
       if (n >= 0) { e.stopPropagation(); pickT(n); keepT(); }
     });
     ov.appendChild(panel); document.body.appendChild(ov);
-    const pickT = (i) => { const n = (i + rowsT.length) % rowsT.length; if (n !== ti) sfx("move"); ti = n; rowsT.forEach((r, j) => { r.classList.toggle("sel", j === ti); r.setAttribute("aria-selected", j === ti); }); apply(THEMES[ti][0]); };
-    const openT = () => { before = cur; ov.hidden = false; ti = -1; pickT(Math.max(0, THEMES.findIndex(t => t[0] === cur))); };
-    const keepT = () => { cur = THEMES[ti][0]; ov.hidden = true; try { localStorage.setItem(KEY, cur); } catch (e) {} post({ action: "theme", name: cur }); sfx("select", 0); };
-    const backT = () => { apply(before); cur = before; ov.hidden = true; sfx("cancel", 0); };
+    let applyT = 0;
+    const pickT = (i) => {   // the highlight moves at once; the whole card is re-skinned once the arrows pause (re-skinning costs ~100 ms: not once per key repeat)
+      const n = (i + rowsT.length) % rowsT.length; if (n !== ti) sfx("move"); ti = n;
+      rowsT.forEach((r, j) => { r.classList.toggle("sel", j === ti); r.setAttribute("aria-selected", j === ti); });
+      const k = THEMES[ti][0]; clearTimeout(applyT); applyT = setTimeout(() => apply(k), 70);
+    };
+    const openT = () => { before = cur; window.QL_PREVIEW = true; ov.hidden = false; holdWindow(true); ti = -1; pickT(Math.max(0, THEMES.findIndex(t => t[0] === cur))); };
+    const closeT = (play) => { window.QL_PREVIEW = false; ov.hidden = true; if (window.QL_THEME_ENTERED) window.QL_THEME_ENTERED(play); holdWindow(false); };
+    const keepT = () => { cur = THEMES[ti][0]; clearTimeout(applyT); apply(cur); closeT(true); try { localStorage.setItem(KEY, cur); } catch (e) {} post({ action: "theme", name: cur }); sfx("select", 0); };
+    const backT = () => { clearTimeout(applyT); apply(before); cur = before; closeT(false); sfx("cancel", 0); };
     ov.addEventListener("click", (e) => { if (e.target === ov) backT(); });
     window.addEventListener("keydown", (e) => {
       if (e.target && e.target.closest && e.target.closest("input, textarea")) return;
