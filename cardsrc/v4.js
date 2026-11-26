@@ -402,10 +402,23 @@
   const drawRoad = (area, t) => {
     area.textContent = "";
     const Wd = area.clientWidth, Hd = area.clientHeight; if (Wd < 60 || Hd < 60) return;
-    const ms = t.milestones, n = ms.length, pad = 26, step = (Hd - pad * 2) / Math.max(1, n);
+    const ms = t.milestones, n = ms.length, pad = 26, H0 = Hd - pad * 2;
     const xf = (i) => (i === 0 || i === n) ? .5 : (i % 2 ? .3 : .7);
-    const P = []; for (let i = 0; i <= n; i++) P.push([Math.round(Wd * xf(i)), Math.round(Hd - pad - i * step)]);
-    const ctrl = (i) => [P[i], [P[i][0], P[i][1] - step * .55], [P[i + 1][0], P[i + 1][1] + step * .55], P[i + 1]];
+    /* each stretch is as tall as its lessons need to sit evenly spaced along the road: a stretch with more lessons, or a short sideways one
+       (the first, out of START, and the last, into the goal), gets taller; the others never drop below 60% of an even share */
+    const a0 = (i) => i ? 30 : 34, a1 = (i) => i === n - 1 ? 42 : 34;   // road kept clear after a milestone and before the next one
+    const dxs = ms.map((m, i) => Wd * Math.abs(xf(i + 1) - xf(i)));
+    const bl = (dx, dy) => { let L = 0, qx = 0, qy = 0; for (let j = 1; j <= 24; j++) { const u = j / 24, v = 1 - u, x = dx * (3 * v * u * u + u * u * u), y = dy * (3 * v * v * u * .55 + 3 * v * u * u * .45 + u * u * u); L += Math.hypot(x - qx, y - qy); qx = x; qy = y; } return L; };
+    const dyFor = (i, L) => { let lo = 0, hi = H0; if (bl(dxs[i], hi) < L) return hi; for (let r = 0; r < 22; r++) { const mid = (lo + hi) / 2; if (bl(dxs[i], mid) < L) lo = mid; else hi = mid; } return hi; };
+    const minH = H0 / Math.max(1, n) * .6, sum = (a) => a.reduce((x, y) => x + y, 0);
+    const hsFor = (g) => ms.map((m, i) => Math.max(minH, dyFor(i, a0(i) + a1(i) + Math.max(0, m.sessions.length - 1) * g)));
+    let gLo = 0, gHi = 400;   // the widest even gap between lessons that still fits the height
+    if (sum(hsFor(0)) >= H0) gHi = 0;
+    else if (sum(hsFor(gHi)) < H0) gLo = gHi;
+    else for (let r = 0; r < 24; r++) { const mid = (gLo + gHi) / 2; if (sum(hsFor(mid)) < H0) gLo = mid; else gHi = mid; }
+    const raw = hsFor(gLo), hs = raw.map(h => h * H0 / sum(raw));
+    const P = [[Math.round(Wd * xf(0)), Hd - pad]]; for (let i = 1; i <= n; i++) P.push([Math.round(Wd * xf(i)), Math.round(P[i - 1][1] - hs[i - 1])]);
+    const ctrl = (i) => [P[i], [P[i][0], P[i][1] - hs[i] * .55], [P[i + 1][0], P[i + 1][1] + hs[i] * .55], P[i + 1]];
     const bez = (c, u) => { const v = 1 - u; return [0, 1].map(k => v * v * v * c[0][k] + 3 * v * v * u * c[1][k] + 3 * v * u * u * c[2][k] + u * u * u * c[3][k]); };
     const dOf = (i) => { const c = ctrl(i); return "M" + c[0] + " C" + c[1] + " " + c[2] + " " + c[3]; };
     let lit = "", cur = "", ahead = "";
@@ -421,13 +434,15 @@
       p.innerHTML = PIN(today ? "#FF8A5C" : "#8FE6FF"); p.appendChild(el("b", null, today ? "Today" : dayN(tomorrowIso))); area.appendChild(p);
     };
     ms.forEach((m, mi) => {   // every lesson stays on the road (ahead ones as outlines), so the whole way to the goal is visible
-      const k = m.sessions.length, c0 = ctrl(mi);
-      let len = 0, prev = bez(c0, 0); for (let j = 1; j <= 24; j++) { const p = bez(c0, j / 24); len += Math.hypot(p[0] - prev[0], p[1] - prev[1]); prev = p; }
-      const uBoss = Math.max(0.5, Math.min(0.8, 1 - 64 / Math.max(1, len)));   // the boss keeps ~64px of road before its milestone, even on a short stretch
+      const k = m.sessions.length, c0 = ctrl(mi), pts = [bez(c0, 0)], cum = [0];
+      for (let j = 1; j <= 48; j++) { const p = bez(c0, j / 48); cum.push(cum[j - 1] + Math.hypot(p[0] - pts[j - 1][0], p[1] - pts[j - 1][1])); pts.push(p); }
+      const len = cum[48], at = (s) => {   // the point s pixels along this stretch
+        let j = 1; while (j < 48 && cum[j] < s) j++;
+        const f = (s - cum[j - 1]) / Math.max(1e-6, cum[j] - cum[j - 1]); return [pts[j - 1][0] + (pts[j][0] - pts[j - 1][0]) * f, pts[j - 1][1] + (pts[j][1] - pts[j - 1][1]) * f];
+      };
+      const sa = Math.min(a0(mi), len * .3), sb = Math.max(sa, len - Math.min(a1(mi), len * .3));   // lessons evenly spaced by distance; the boss, last, waits just before its milestone
       m.sessions.forEach((x, si) => {
-        const hasBoss = !!(m.sessions[k - 1] || {}).boss, nl = hasBoss ? k - 1 : k;   // lessons spread over the first two thirds; the boss waits just before its milestone
-        const u = x.boss ? uBoss : hasBoss ? 0.08 + (uBoss - 0.2) * (si + 0.5) / Math.max(1, nl) : (si + 1) / (k + 1);
-        const [px, py] = bez(ctrl(mi), u), ls = lessonState(t, mi, si);
+        const [px, py] = at(k > 1 ? sa + (sb - sa) * si / (k - 1) : (sa + sb) / 2), ls = lessonState(t, mi, si);
         const d = el("div", "sdot " + ls + (x.boss ? " boss" : "")); d.style.left = px + "px"; d.style.top = py + "px"; if (x.boss) d.innerHTML = BOSS_G; area.appendChild(d);
         const st = stops.find(z => z.kind === "s" && z.m === mi && z.s === si); if (st) { st.x = px; st.y = py; st.r = x.boss ? 19 : 13; }
         d.addEventListener("click", (e) => { e.stopPropagation(); focusMap(stops.indexOf(st)); });
